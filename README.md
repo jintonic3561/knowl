@@ -1,0 +1,103 @@
+# Knowl
+
+複数の自リポジトリの GitHub issue を、Claude Code の使用量に余裕がある時間帯に自動消化する小さなオーケストレータ。Pro / Max subscription の OAuth トークンを使い、5h ローリング枠と週次枠の残量を見てゲート判定し、登録リポジトリの open issue から最優先 1 件を Claude に判定させ、対応する作業コンテナで `claude -p` を起動して PR / コメントまで進める。
+
+## 動く範囲（spec.md と対応）
+
+| 要件 | 内容 | 実装 |
+| --- | --- | --- |
+| R1 | リポジトリ登録 / container 自動起動 | `knowl.config`, `knowl.container` |
+| R2 | Claude usage API 取得 (5h / 週次) | `knowl.usage` |
+| R3 | 起動ゲート判定 (デフォルト 30% / 10%) | `knowl.gate` |
+| R4 | 全リポ open issue 収集 + Claude 優先度判定 | `knowl.github_client`, `knowl.prioritize` |
+| R5 | 実装タスク → PR / 自動 merge | `templates/implementation.md`, `knowl.tasks` |
+| R6 | 調査タスク → issue コメント | `templates/investigation.md`, `knowl.tasks` |
+| R7 | 後続タスクの起票 | テンプレ内手順 + `knowl.tasks` |
+| R8 | Slack サマリ通知 / limit アラート | `knowl.slack` |
+
+## 使い方 (常時起動コンテナ運用)
+
+```bash
+# 1. 設定ファイルを用意
+cp docker/config.example.yaml docker/config.yaml
+$EDITOR docker/config.yaml
+
+# 2. Claude Code に予めログインしておく (ホスト側で)
+#    -> ~/.claude/.credentials.json が生成される
+
+# 3. Slack 連携をしたい場合は .env を用意 (gitignore 済)
+cat > .env <<'EOF'
+SLACK_BOT_TOKEN=xoxb-...
+SLACK_CHANNEL=#knowl
+EOF
+
+# 4. 起動
+docker compose -f docker/docker-compose.yml --env-file .env up -d --build
+
+# ログ確認
+docker logs -f knowl
+```
+
+cron は `cron_interval_minutes` 設定 (デフォルト 60 分) に従って `knowl run-once` を起動する。ゲート判定で余裕がなければ no-op で次回まで待機する。
+
+### 対象リポジトリ container 側で必要な前提
+
+Knowl は `docker exec <target> claude -p ...` で対象リポジトリ container 内の Claude を起動するため、対象 container 側で次が成立している必要がある:
+
+- Claude Code がインストール済み
+- `~/.claude/.credentials.json` が container 内に存在 (推奨はホストの `~/.claude` を `ro` でマウントする)
+- `gh` がインストール済かつ `gh auth login` 済 (または `GH_TOKEN` を環境変数で渡す)
+- リポジトリ作業ディレクトリが bind マウントされており `git push` が可能
+
+target container の compose 例 (一部抜粋):
+
+```yaml
+services:
+  your-repo-dev:
+    container_name: your-repo-dev
+    volumes:
+      - ${HOME}/.claude:/root/.claude:ro
+      - ${HOME}/.config/gh:/root/.config/gh:ro
+      - ./your-repo:/workspace
+```
+
+Knowl は `claude -p` に既定で `--dangerously-skip-permissions` を付ける。これは「対象 container はサンドボックスである」前提に基づく。containerの隔離設計が不十分な場合は、自前ラッパで `--allowed-tools` 制限などに置き換えること。
+
+## ローカル開発
+
+```bash
+uv sync
+uv run ruff check
+uv run mypy
+uv run pytest
+uv run knowl check-config --config docker/config.example.yaml
+```
+
+## 設定スキーマ (抜粋)
+
+```yaml
+model: claude-opus-4-7        # 既定。Claude モデル ID。
+cron_interval_minutes: 60     # cron 周期 (分)。
+thresholds:
+  session_remaining_pct: 30   # 5h 枠の最低残量 (%)
+  weekly_remaining_pct: 10    # 週次枠の最低残量 (%)
+slack:
+  channel: "#knowl"           # SLACK_CHANNEL 環境変数で上書き可
+templates:
+  implementation: templates/implementation.md
+  investigation: templates/investigation.md
+repositories:
+  - name: owner/repo
+    container:
+      kind: docker            # docker | devcontainer (どちらも docker exec で扱う)
+      name: container-name
+      workdir: /workspace
+```
+
+## 状況
+
+開発状況は `status.html` を参照(これ一枚で現在の充足状況・モジュール状態・運用想定・直近 TODO がわかる)。
+
+## ライセンス
+
+Apache License 2.0. 詳細は `LICENSE` を参照。

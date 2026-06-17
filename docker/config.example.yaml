@@ -1,0 +1,27 @@
+# Knowl 設定例 (cp して docker/config.yaml にし、compose で /etc/knowl/config.yaml にマウント)
+model: claude-opus-4-7
+cron_interval_minutes: 60
+
+thresholds:
+  session_remaining_pct: 30   # 5h ローリング枠の最低残量(%)
+  weekly_remaining_pct: 10    # 週次枠の最低残量(%)
+
+slack:
+  channel: "#knowl"            # SLACK_CHANNEL 環境変数で上書き可
+
+templates:
+  implementation: templates/implementation.md
+  investigation: templates/investigation.md
+
+# 対象リポジトリの container 側で claude / gh が認証済であることが前提。
+# 推奨セットアップ:
+#   - 対象 container の起動時に host の `~/.claude` を読み取り専用でマウントする
+#       (e.g. compose の volumes: ["${HOME}/.claude:/root/.claude:ro"])
+#   - 対象 container 内の workdir にホストのリポジトリを bind マウントしておく
+#   - gh は `gh auth login` 済か、`GH_TOKEN` を environment 経由で渡す
+repositories:
+  - name: your-org/your-repo
+    container:
+      kind: docker            # docker | devcontainer
+      name: your-repo-dev
+      workdir: /workspace

@@ -1,0 +1,21 @@
+services:
+  knowl:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: knowl
+    restart: unless-stopped
+    environment:
+      SLACK_BOT_TOKEN: "${SLACK_BOT_TOKEN:-}"
+      SLACK_CHANNEL: "${SLACK_CHANNEL:-}"
+      KNOWL_CONFIG: /etc/knowl/config.yaml
+      KNOWL_CREDENTIALS: /root/.claude/.credentials.json
+    volumes:
+      # Knowl 設定 (必須)
+      - ./config.yaml:/etc/knowl/config.yaml:ro
+      # Claude Code OAuth credentials (必須)
+      - ${HOME}/.claude/.credentials.json:/root/.claude/.credentials.json:ro
+      # 対象リポジトリのコンテナを起動・exec するため docker.sock をマウント
+      - /var/run/docker.sock:/var/run/docker.sock
+      # gh CLI 認証情報 (任意)
+      - ${HOME}/.config/gh:/root/.config/gh:ro

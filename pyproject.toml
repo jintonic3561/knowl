@@ -1,0 +1,67 @@
+[project]
+name = "knowl"
+version = "0.1.0"
+description = "Autonomous GitHub issue-driven agent orchestrator for Claude Code."
+readme = "README.md"
+requires-python = ">=3.13"
+license = { text = "Apache-2.0" }
+authors = [{ name = "knowl maintainers" }]
+dependencies = [
+  "httpx>=0.28",
+  "pydantic>=2.9",
+  "pyyaml>=6.0",
+  "click>=8.1",
+]
+
+[project.scripts]
+knowl = "knowl.cli:main"
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3",
+  "pytest-mock>=3.14",
+  "ruff>=0.7",
+  "mypy>=1.13",
+  "types-PyYAML>=6.0",
+]
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/knowl"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+src = ["src", "tests"]
+extend-exclude = [".claude", ".devcontainer", ".logs", ".worktrees"]
+
+[tool.ruff.lint]
+select = [
+  "E", "F", "W",  # pycodestyle / pyflakes
+  "I",            # isort
+  "UP",           # pyupgrade
+  "B",            # bugbear
+  "SIM",          # simplify
+  "RUF",          # ruff
+]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+files = ["src", "tests"]
+mypy_path = "src"
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_decorators = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
