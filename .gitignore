@@ -1,0 +1,19 @@
+# Secrets（コミット禁止）
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Logs / plans
+/.logs/
+
+# Git worktrees（並列ブランチ作業用・追跡しない）
+/.worktrees/

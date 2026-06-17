@@ -1,0 +1,51 @@
+{
+  "plansDirectory": ".logs/plans",
+  "permissions": {
+    "defaultMode": "bypassPermissions",
+    "deny": [
+      "Read(**/.env)",
+      "Read(**/.env.*)",
+      "Edit(**/.env)",
+      "Edit(**/.env.*)",
+      "Write(**/.env)",
+      "Write(**/.env.*)"
+    ]
+  },
+  "language": "japanese",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./.claude/hooks/prompt-logger.py",
+            "statusMessage": "プロンプトをログに記録中..."
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "permission_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CLAUDE_CODE_HOOK_EVENT=Notification ./.claude/hooks/notify.py",
+            "statusMessage": "Slack通知を送信中..."
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CLAUDE_CODE_HOOK_EVENT=Stop ./.claude/hooks/notify.py",
+            "statusMessage": "完了通知を送信中..."
+          }
+        ]
+      }
+    ]
+  }
+}
