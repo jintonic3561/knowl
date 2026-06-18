@@ -113,9 +113,9 @@ repositories:
       #                       # docker exec 非対話で direnv 等を発火させたい時に使う。
 ```
 
-## 状況
+## 開発者向けドキュメント
 
-開発状況は `status.html` を参照。
+開発者向け補足は `docs/status.html` 参照。
 
 ## ライセンス
 
