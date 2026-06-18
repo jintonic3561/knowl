@@ -14,6 +14,7 @@ from typing import Protocol
 from knowl.claude_runner import ClaudeError
 from knowl.config import AppConfig, ContainerConfig, RepoConfig
 from knowl.container import ContainerError
+from knowl.filters import exclude_blocked_issues
 from knowl.gate import evaluate_gate
 from knowl.github_client import GitHubError, IssueRef
 from knowl.prioritize import NoActionableIssue, PrioritizationError, PriorityDecision
@@ -111,8 +112,17 @@ def run_cycle(
         notify(build_idle_notice("open issue が見つからない"))
         return CycleResult(executed=False, reason="no open issues", usage=usage)
 
+    candidates = exclude_blocked_issues(issues)
+    if not candidates:
+        reason = "open issue は全て PR レビュー中 / 調査完了済み"
+        _LOG.info("all open issues blocked: %s", reason)
+        notify(build_idle_notice(reason))
+        return CycleResult(
+            executed=False, reason=f"no actionable issue: {reason}", usage=usage
+        )
+
     try:
-        prioritized = prioritize(issues, model=cfg.model)
+        prioritized = prioritize(candidates, model=cfg.model)
     except PrioritizationError as exc:
         _LOG.warning("prioritization failed: %s", exc)
         notify(_build_error_alert("prioritization", exc))

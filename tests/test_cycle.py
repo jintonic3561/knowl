@@ -32,15 +32,22 @@ def app_cfg(tmp_path: Path) -> AppConfig:
     )
 
 
-def make_issue(repo_name: str = "acme/widgets", number: int = 1) -> IssueRef:
+def make_issue(
+    repo_name: str = "acme/widgets",
+    number: int = 1,
+    *,
+    labels: tuple[str, ...] = (),
+    linked_pr_count: int = 0,
+) -> IssueRef:
     return IssueRef(
         repo=repo_name,
         number=number,
         title="t",
         body="b",
-        labels=(),
+        labels=labels,
         url=f"https://github.com/{repo_name}/issues/{number}",
         updated_at="2026-06-01T00:00:00Z",
+        linked_pr_count=linked_pr_count,
     )
 
 
@@ -100,6 +107,94 @@ def test_run_cycle_no_op_when_no_issues(tmp_path: Path) -> None:
     # 「進めるべき issue がない」旨を Slack に流す
     assert len(posted) == 1
     assert "issue" in posted[0].lower() or "進めるべき" in posted[0]
+
+
+def test_run_cycle_no_op_when_all_issues_blocked(tmp_path: Path) -> None:
+    from knowl.filters import INVESTIGATED_LABEL
+
+    cfg = app_cfg(tmp_path)
+    posted: list[str] = []
+
+    blocked_issues = [
+        make_issue(number=1, linked_pr_count=1),
+        make_issue(number=2, labels=(INVESTIGATED_LABEL,)),
+    ]
+
+    result = run_cycle(
+        cfg,
+        fetch_usage=lambda: UsageSnapshot(
+            session_remaining_pct=80, weekly_remaining_pct=80
+        ),
+        list_issues=lambda repos: blocked_issues,
+        prioritize=lambda issues, **_: pytest.fail(  # pragma: no cover
+            "prioritize must not be invoked when all issues are blocked"
+        ),
+        run_task=lambda *a, **kw: pytest.fail(  # pragma: no cover
+            "run_task must not be invoked when all issues are blocked"
+        ),
+        notify=posted.append,
+        ensure_container=lambda _: pytest.fail(  # pragma: no cover
+            "container must not be ensured when all issues are blocked"
+        ),
+    )
+    assert result.executed is False
+    assert "no actionable issue" in result.reason.lower()
+    assert len(posted) == 1
+    assert "💤" in posted[0]
+
+
+def test_run_cycle_filters_blocked_before_prioritize(tmp_path: Path) -> None:
+    from knowl.filters import INVESTIGATED_LABEL
+
+    cfg = app_cfg(tmp_path)
+    posted: list[str] = []
+
+    actionable = make_issue(number=1)
+    issues = [
+        make_issue(number=2, linked_pr_count=1),
+        actionable,
+        make_issue(number=3, labels=(INVESTIGATED_LABEL,)),
+    ]
+
+    def prioritize(
+        issues: list[IssueRef], *, model: str
+    ) -> tuple[PriorityDecision, IssueRef]:
+        # blocked な issue は prioritize に渡らないこと
+        assert [i.number for i in issues] == [1]
+        return (
+            PriorityDecision(
+                repo="acme/widgets",
+                number=1,
+                kind=TaskKind.IMPLEMENTATION,
+                reason="only candidate",
+            ),
+            issues[0],
+        )
+
+    def run_task(
+        cfg: AppConfig, decision: PriorityDecision, issue: IssueRef
+    ) -> TaskOutcome:
+        return TaskOutcome(
+            kind=TaskKind.IMPLEMENTATION,
+            action="pr-opened",
+            summary="",
+            url="https://pr/1",
+            followups=[],
+        )
+
+    result = run_cycle(
+        cfg,
+        fetch_usage=lambda: UsageSnapshot(
+            session_remaining_pct=80, weekly_remaining_pct=80
+        ),
+        list_issues=lambda repos: issues,
+        prioritize=prioritize,
+        run_task=run_task,
+        notify=posted.append,
+        ensure_container=lambda _: None,
+    )
+    assert result.executed is True
+    assert result.issue is actionable
 
 
 def test_run_cycle_no_op_when_no_actionable_issue(tmp_path: Path) -> None:

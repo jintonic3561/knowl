@@ -15,7 +15,8 @@
 2. 仮説 → 根拠の列挙 → 反証検討。可能なら最小限の再現や検証コードで確認する(コミット不要、調査用に留める)。
 3. 結論・残る不確実性・推奨する次アクションを整理。
 4. 結果を Markdown でまとめ、 `gh issue comment {issue_number} --repo {repo}` で issue に投稿する。
-5. 後続タスクが必要なら GitHub issue を新規起票し、URL を最終出力に含める。
+5. 投稿後、`gh issue edit {issue_number} --repo {repo} --add-label knowl-investigated` で完了マーカーラベルを付ける(ラベルが存在しない場合は `gh label create knowl-investigated --repo {repo} --color ededed` で作成してから付与する)。これが付いていない調査タスクは次サイクル以降も再抽出されるため、no-op で終わる場合も含めて必ず付与する。
+6. 後続タスクが必要なら GitHub issue を新規起票し、URL を最終出力に含める。
 
 ## 制約
 
