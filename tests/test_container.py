@@ -37,12 +37,24 @@ class RunRecorder:
         return subprocess.CompletedProcess(args=list(cmd), returncode=rc, stdout=out, stderr=err)
 
 
-def docker_cfg(name: str = "widgets-dev", user: str | None = None) -> ContainerConfig:
-    return ContainerConfig(kind=ContainerKind.DOCKER, name=name, user=user)
+def docker_cfg(
+    name: str = "widgets-dev",
+    user: str | None = None,
+    exec_prefix: list[str] | None = None,
+) -> ContainerConfig:
+    return ContainerConfig(
+        kind=ContainerKind.DOCKER, name=name, user=user, exec_prefix=exec_prefix
+    )
 
 
-def devcontainer_cfg(name: str = "widgets-dev", user: str | None = None) -> ContainerConfig:
-    return ContainerConfig(kind=ContainerKind.DEVCONTAINER, name=name, user=user)
+def devcontainer_cfg(
+    name: str = "widgets-dev",
+    user: str | None = None,
+    exec_prefix: list[str] | None = None,
+) -> ContainerConfig:
+    return ContainerConfig(
+        kind=ContainerKind.DEVCONTAINER, name=name, user=user, exec_prefix=exec_prefix
+    )
 
 
 def test_ensure_running_skips_start_when_already_running(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -178,3 +190,39 @@ def test_exec_in_container_omits_user_flag_when_unset(monkeypatch: pytest.Monkey
     # user 未指定時は shell wrap なし。argv 末尾そのまま。
     assert flat[-2:] == ["echo", "hi"]
     assert "bash" not in flat
+
+
+def test_exec_in_container_prepends_exec_prefix_without_user(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rec = RunRecorder([(0, "true\n", ""), (0, "", "")])
+    monkeypatch.setattr(subprocess, "run", rec)
+
+    exec_in_container(
+        docker_cfg(exec_prefix=["direnv", "exec", "."]),
+        ["claude", "-p"],
+        workdir="/work",
+    )
+
+    flat = rec.calls[1]
+    # user 未指定 → shell wrap なし。prefix が argv 先頭に prepend される。
+    assert "bash" not in flat
+    assert flat[-5:] == ["direnv", "exec", ".", "claude", "-p"]
+
+
+def test_exec_in_container_prepends_exec_prefix_with_user(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rec = RunRecorder([(0, "true\n", ""), (0, "", "")])
+    monkeypatch.setattr(subprocess, "run", rec)
+
+    exec_in_container(
+        devcontainer_cfg(user="vscode", exec_prefix=["direnv", "exec", "."]),
+        ["claude", "-p"],
+        workdir="/work",
+    )
+
+    flat = rec.calls[1]
+    # user 指定 → bash -lc 経由。prefix + argv が shlex.join で1引数化。
+    assert flat[-3:-1] == ["bash", "-lc"]
+    assert flat[-1] == "direnv exec . claude -p"

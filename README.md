@@ -52,6 +52,8 @@ Knowl は `claude -p` に既定で `--dangerously-skip-permissions` を付ける
 
 devcontainer は root 以外 (`vscode` / `node` / `ubuntu` など) をメインユーザにしているのが普通で、`claude` も大抵そのユーザの home 配下 (`~/.local/bin/claude` 等) にインストールされる。`docker exec` は既定で root + 非ログインシェルで動くため、`~/.local/bin` が PATH に乗らず `claude: executable file not found in $PATH` で失敗する。`container.user` を設定すれば、Knowl は `docker exec --user <user> ... bash -lc <argv>` でログインシェル経由で起動するので、対象 user の `.bashrc` / `.profile` が読み込まれて PATH が通る (`bash` が入っている前提)。
 
+また `direnv` のようなシェル hook 型 env ローダ (`PROMPT_COMMAND` で発火) は `docker exec` の非対話実行では発火しないため、`.envrc` の `GH_TOKEN` / `SLACK_BOT_TOKEN` 等が target container 内に流れない。`container.exec_prefix` に `["direnv", "exec", "."]` のような明示的な exec ラッパを設定すると、argv の前に prepend されて env が流れる。`["mise", "exec", "--"]` のように argv を透過渡しするラッパなら同様に使える (`nix-shell --run "<cmd>"` 型のように単一シェル文字列を要求するラッパは prepend では正しく動かない)。
+
 ## ローカル開発
 
 ```bash
@@ -83,6 +85,9 @@ repositories:
       workdir: /workspace
       # user: vscode          # docker exec --user に渡す (任意)。
       #                       # devcontainer の remoteUser で claude を入れている場合に指定。
+      # exec_prefix: ["direnv", "exec", "."]
+      #                       # argv の前に prepend する任意のラッパ (任意)。
+      #                       # docker exec 非対話で direnv 等を発火させたい時に使う。
 ```
 
 ## 状況

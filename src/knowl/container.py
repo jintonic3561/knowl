@@ -87,13 +87,18 @@ def exec_in_container(
         for key, value in env.items():
             cmd.extend(["-e", f"{key}={value}"])
     cmd.append(container.name)
+    # docker exec は非対話実行のため、シェル hook 型ツール (direnv 等) が発火しない。
+    # 明示的な exec ラッパ (direnv exec / mise exec --) を argv の前に prepend する。
+    final_argv: list[str] = (
+        [*container.exec_prefix, *argv] if container.exec_prefix else list(argv)
+    )
     if container.user:
         # 非 root user の home 配下にしか PATH が通らないバイナリ
         # (例: devcontainer の ~/.local/bin/claude) を呼べるよう login shell でラップ。
         # argv は shlex.join で安全にエスケープ。
-        cmd.extend(["bash", "-lc", shlex.join(argv)])
+        cmd.extend(["bash", "-lc", shlex.join(final_argv)])
     else:
-        cmd.extend(argv)
+        cmd.extend(final_argv)
     try:
         result = subprocess.run(
             cmd,

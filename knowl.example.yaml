@@ -25,3 +25,9 @@ repositories:
       #                       # (vscode / node / ubuntu 等) に claude をインストール
       #                       # している場合は指定する。指定時は bash -lc 経由で起動し、
       #                       # 対象 user の .bashrc / .profile で PATH が拾われる。
+      # exec_prefix: ["direnv", "exec", "."]
+      #                       # argv の前に prepend する任意のラッパ。docker exec は非対話
+      #                       # 実行のためシェル hook 型 (direnv 等) は発火しない。明示的な
+      #                       # exec ラッパで .envrc 等から GH_TOKEN を流す用途。
+      #                       # argv 透過型なら他にも使える: ["mise", "exec", "--"] 等。
+      #                       # 単一シェル文字列を要求する `nix-shell --run "<cmd>"` 型は不可。

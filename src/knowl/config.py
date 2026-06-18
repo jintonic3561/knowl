@@ -32,6 +32,10 @@ class ContainerConfig(BaseModel):
     # devcontainer の remoteUser (vscode / node 等) を docker exec --user に渡す。
     # 未指定なら root 実行。
     user: str | None = Field(default=None, min_length=1)
+    # argv の前に prepend する任意のラッパ。docker exec が非対話実行のため
+    # シェル hook 型ツール (direnv 等) が発火しない問題を、明示的な exec ラッパで回避する。
+    # 例: ["direnv", "exec", "."] / ["mise", "exec", "--"] / ["nix-shell", "--run"]。
+    exec_prefix: list[str] | None = Field(default=None, min_length=1)
 
 
 class RepoConfig(BaseModel):
