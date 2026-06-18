@@ -13,12 +13,8 @@ templates:
   implementation: templates/implementation.md
   investigation: templates/investigation.md
 
-# 対象リポジトリの container 側で claude / gh が認証済であることが前提。
-# 推奨セットアップ:
-#   - 対象 container の起動時に host の `~/.claude` を読み取り専用でマウントする
-#       (e.g. compose の volumes: ["${HOME}/.claude:/root/.claude:ro"])
-#   - 対象 container 内の workdir にホストのリポジトリを bind マウントしておく
-#   - gh は `gh auth login` 済か、`GH_TOKEN` を environment 経由で渡す
+# 対象リポジトリの container 側で claude / gh が認証済であることが前提
+# (Knowl 側からは credentials を中継しない)。
 repositories:
   - name: your-org/your-repo
     container:

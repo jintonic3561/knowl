@@ -22,9 +22,10 @@ from knowl.usage import (
 
 
 def test_parse_usage_payload_basic() -> None:
+    # 実 API は utilization を percent (0..100) で返す
     payload = {
-        "five_hour": {"utilization": 0.4},
-        "seven_day": {"utilization": 0.1},
+        "five_hour": {"utilization": 40.0},
+        "seven_day": {"utilization": 10.0},
     }
     snap = parse_usage_payload(payload)
     assert isinstance(snap, UsageSnapshot)
@@ -45,13 +46,13 @@ def test_parse_usage_payload_alternative_shape() -> None:
 
 def test_parse_usage_payload_missing_section_raises() -> None:
     with pytest.raises(UsageError):
-        parse_usage_payload({"five_hour": {"utilization": 0.1}})
+        parse_usage_payload({"five_hour": {"utilization": 10.0}})
 
 
 def test_parse_usage_payload_clamps_to_0_100() -> None:
     payload = {
-        "five_hour": {"utilization": 1.5},  # 150% → remaining -50 → 0
-        "seven_day": {"utilization": -0.2},  # マイナス → remaining 120 → 100
+        "five_hour": {"utilization": 150.0},  # 150% → remaining -50 → 0
+        "seven_day": {"utilization": -20.0},  # マイナス → remaining 120 → 100
     }
     snap = parse_usage_payload(payload)
     assert snap.session_remaining_pct == 0.0
@@ -95,8 +96,8 @@ def test_fetch_usage_calls_endpoint_with_auth_header() -> None:
         return httpx.Response(
             200,
             json={
-                "five_hour": {"utilization": 0.5},
-                "seven_day": {"utilization": 0.2},
+                "five_hour": {"utilization": 50.0},
+                "seven_day": {"utilization": 20.0},
             },
         )
 

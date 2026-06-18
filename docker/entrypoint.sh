@@ -12,14 +12,27 @@ from knowl.config import load_config
 print(load_config('${CONFIG}').cron_interval_minutes)
 ")"
 
-# /etc/cron.d/knowl の冒頭に直接 KEY=VALUE を書くため、ここでまず env 行を組み立てる。
-# vixie cron は /etc/environment / PAM を経由せずジョブ環境を組むので、確実に届ける手段はこれ。
+# vixie cron は /etc/environment / PAM を経由せずジョブ環境を組むので、env を確実に届ける必要がある。
+# /etc/cron.d/knowl は 0644 で平文公開されるので、機密は別ファイル 0600 に切り出し run-cycle.sh で source する。
+# 非機密の値だけ /etc/cron.d/knowl 冒頭の KEY=VALUE 行に並べる。
 CRON_ENV_LINES="PATH=${PATH}"
-for v in SLACK_BOT_TOKEN SLACK_CHANNEL KNOWL_CONFIG KNOWL_CREDENTIALS; do
+for v in SLACK_CHANNEL KNOWL_CONFIG KNOWL_CREDENTIALS; do
   val="${!v-}"
   if [ -n "${val}" ]; then
     CRON_ENV_LINES="${CRON_ENV_LINES}
 ${v}=${val}"
+  fi
+done
+
+# 機密 env は 0600 の別ファイルに書き出す。先に空ファイルを 0600 で作ってから追記することで
+# 平文の中身がデフォルト umask の隙間で他者から read 可能になる窓を作らない。
+SECRETS_ENV=/etc/knowl/secrets.env
+mkdir -p /etc/knowl
+install -m 0600 /dev/null "${SECRETS_ENV}"
+for v in SLACK_BOT_TOKEN GH_TOKEN; do
+  val="${!v-}"
+  if [ -n "${val}" ]; then
+    printf '%s=%q\n' "${v}" "${val}" >> "${SECRETS_ENV}"
   fi
 done
 

@@ -59,7 +59,7 @@ def _extract_remaining_pct(section: dict[str, Any]) -> float:
     サーバ実装の揺らぎを許容するため、複数キーをフォールバック評価する。
     """
     if "utilization" in section:
-        return _clamp((1.0 - float(section["utilization"])) * 100.0)
+        return _clamp(100.0 - float(section["utilization"]))
     if "used_percent" in section:
         return _clamp(100.0 - float(section["used_percent"]))
     if "remaining_percent" in section:

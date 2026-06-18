@@ -11,7 +11,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # 基本ツール + GitHub CLI 用 apt リポジトリ
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        ca-certificates curl git cron tini docker.io gnupg \
+        ca-certificates curl git cron tini docker-cli gnupg \
     && install -d -m 0755 /etc/apt/keyrings \
     && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
         | gpg --dearmor -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \

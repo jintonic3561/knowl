@@ -42,26 +42,13 @@ cron は `cron_interval_minutes` 設定 (デフォルト 60 分) に従って `k
 
 ### 対象リポジトリ container 側で必要な前提
 
-Knowl は `docker exec <target> claude -p ...` で対象リポジトリ container 内の Claude を起動するため、対象 container 側で次が成立している必要がある:
+Knowl は `docker exec <target> claude -p ...` で対象リポジトリ container 内の Claude を起動するだけで、credentials の中継は一切しない。対象 container 側で:
 
-- Claude Code がインストール済み
-- `~/.claude/.credentials.json` が container 内に存在 (推奨はホストの `~/.claude` を `ro` でマウントする)
-- `gh` がインストール済かつ `gh auth login` 済 (または `GH_TOKEN` を環境変数で渡す)
-- リポジトリ作業ディレクトリが bind マウントされており `git push` が可能
+- Claude Code がインストール済 + 認証済 (`~/.claude/.credentials.json` 相当が存在)
+- `gh` がインストール済 + 認証済 (または `GH_TOKEN` を環境変数で渡す)
+- リポジトリ作業ディレクトリが workdir に bind マウントされており `git push` が可能
 
-target container の compose 例 (一部抜粋):
-
-```yaml
-services:
-  your-repo-dev:
-    container_name: your-repo-dev
-    volumes:
-      - ${HOME}/.claude:/root/.claude:ro
-      - ${HOME}/.config/gh:/root/.config/gh:ro
-      - ./your-repo:/workspace
-```
-
-Knowl は `claude -p` に既定で `--dangerously-skip-permissions` を付ける。これは「対象 container はサンドボックスである」前提に基づく。containerの隔離設計が不十分な場合は、自前ラッパで `--allowed-tools` 制限などに置き換えること。
+Knowl は `claude -p` に既定で `--dangerously-skip-permissions` を付ける。これは「対象 container はサンドボックスである」前提に基づく。container の隔離設計が不十分な場合は、自前ラッパで `--allowed-tools` 制限などに置き換えること。
 
 ## ローカル開発
 
