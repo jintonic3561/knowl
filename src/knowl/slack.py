@@ -73,6 +73,16 @@ class SlackNotifier:
             raise SlackError(f"Slack reported error: {data}")
 
 
+def build_cycle_start_notice(
+    *,
+    repo: str,
+    issue_number: int,
+    issue_title: str,
+) -> str:
+    """着手 issue が決まり container が起動した直後に出す簡潔な開始通知."""
+    return f"▶️ *{repo}#{issue_number}* — {issue_title} を開始"
+
+
 def build_cycle_summary(
     *,
     repo: str,

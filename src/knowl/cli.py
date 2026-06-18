@@ -11,6 +11,7 @@ from pathlib import Path
 import click
 
 from knowl.config import AppConfig, ConfigError, RepoConfig, load_config
+from knowl.container import ensure_running
 from knowl.cycle import CycleResult, run_cycle
 from knowl.github_client import IssueRef, list_open_issues
 from knowl.keepalive import DEFAULT_THRESHOLD_MS, DEFAULT_TIMEOUT_S, keepalive_once
@@ -132,6 +133,7 @@ def run_once(config_path: Path, credentials_path: Path | None) -> None:
         prioritize=_prioritize,
         run_task=_run_task,
         notify=notify,
+        ensure_container=ensure_running,
     )
 
     if not result.executed:

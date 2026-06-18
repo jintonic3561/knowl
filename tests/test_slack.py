@@ -8,9 +8,23 @@ import pytest
 from knowl.slack import (
     SlackError,
     SlackNotifier,
+    build_cycle_start_notice,
     build_cycle_summary,
     build_limit_alert,
 )
+
+
+def test_build_cycle_start_notice_is_concise() -> None:
+    text = build_cycle_start_notice(
+        repo="acme/widgets",
+        issue_number=42,
+        issue_title="Fix login",
+    )
+    assert "acme/widgets" in text
+    assert "#42" in text
+    assert "Fix login" in text
+    # 簡潔性: 1 行に収める
+    assert "\n" not in text
 
 
 def test_build_cycle_summary_minimal() -> None:

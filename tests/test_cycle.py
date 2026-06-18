@@ -65,6 +65,7 @@ def test_run_cycle_no_op_when_gate_blocks(tmp_path: Path) -> None:
             kind=TaskKind.IMPLEMENTATION, action="x", summary="", url=None, followups=[]
         ),
         notify=notifications.append,
+        ensure_container=lambda _: None,
     )
 
     assert isinstance(result, CycleResult)
@@ -91,6 +92,7 @@ def test_run_cycle_no_op_when_no_issues(tmp_path: Path) -> None:
             kind=TaskKind.IMPLEMENTATION, action="x", summary="", url=None, followups=[]
         ),
         notify=lambda _: None,
+        ensure_container=lambda _: None,
     )
     assert result.executed is False
     assert "no open issues" in result.reason
@@ -99,6 +101,7 @@ def test_run_cycle_no_op_when_no_issues(tmp_path: Path) -> None:
 def test_run_cycle_happy_path(tmp_path: Path) -> None:
     cfg = app_cfg(tmp_path)
     posted: list[str] = []
+    ensured: list[str] = []
 
     fixture_issue = make_issue(number=42)
     fixture_decision = PriorityDecision(
@@ -117,6 +120,8 @@ def test_run_cycle_happy_path(tmp_path: Path) -> None:
     ) -> TaskOutcome:
         assert decision is fixture_decision
         assert issue is fixture_issue
+        # 開始通知は run_task より前に 1 件流れているはず (文言には依存しない)
+        assert len(posted) == 1
         return TaskOutcome(
             kind=TaskKind.IMPLEMENTATION,
             action="pr-opened",
@@ -124,6 +129,12 @@ def test_run_cycle_happy_path(tmp_path: Path) -> None:
             url="https://pr/1",
             followups=["next"],
         )
+
+    def ensure_container(c: object) -> None:
+        from knowl.config import ContainerConfig
+
+        assert isinstance(c, ContainerConfig)
+        ensured.append(c.name)
 
     result = run_cycle(
         cfg,
@@ -134,14 +145,55 @@ def test_run_cycle_happy_path(tmp_path: Path) -> None:
         prioritize=prioritize,
         run_task=run_task,
         notify=posted.append,
+        ensure_container=ensure_container,
     )
 
     assert result.executed is True
     assert result.outcome is not None
     assert result.outcome.action == "pr-opened"
-    assert posted, "summary should be posted to Slack"
-    assert "pr-opened" in posted[0]
-    assert "next" in posted[0]
+    assert ensured == ["c"], "container must be ensured exactly once"
+    # 通知は [開始通知, サマリ] の順
+    assert len(posted) == 2
+    assert "acme/widgets" in posted[0]
+    assert "#42" in posted[0]
+    assert "開始" in posted[0]
+    assert "pr-opened" in posted[1]
+    assert "next" in posted[1]
+
+
+def test_run_cycle_container_start_failure_notifies(tmp_path: Path) -> None:
+    cfg = app_cfg(tmp_path)
+    posted: list[str] = []
+
+    def ensure_container(_c: object) -> None:
+        from knowl.container import ContainerError
+
+        raise ContainerError("docker daemon unavailable")
+
+    result = run_cycle(
+        cfg,
+        fetch_usage=lambda: UsageSnapshot(
+            session_remaining_pct=80, weekly_remaining_pct=80
+        ),
+        list_issues=lambda repos: [make_issue()],
+        prioritize=lambda issues, **_: (
+            PriorityDecision(
+                repo="acme/widgets", number=1, kind=TaskKind.IMPLEMENTATION, reason=""
+            ),
+            issues[0],
+        ),
+        run_task=lambda *a, **kw: pytest.fail(
+            "run_task must not be invoked when container start fails"
+        ),
+        notify=posted.append,
+        ensure_container=ensure_container,
+    )
+
+    assert result.executed is False
+    assert "container start failed" in result.reason
+    assert any("container start" in p for p in posted)
+    # 開始通知は流さない
+    assert not any("開始" in p for p in posted)
 
 
 def test_run_cycle_handles_limit_alert(tmp_path: Path) -> None:
@@ -167,6 +219,7 @@ def test_run_cycle_handles_limit_alert(tmp_path: Path) -> None:
         ),
         run_task=run_task,
         notify=posted.append,
+        ensure_container=lambda _: None,
     )
 
     assert result.executed is False
@@ -197,6 +250,7 @@ def test_run_cycle_usage_error_notifies(tmp_path: Path) -> None:
             kind=TaskKind.IMPLEMENTATION, action="x", summary="", url=None, followups=[]
         ),
         notify=posted.append,
+        ensure_container=lambda _: None,
     )
     assert result.executed is False
     assert "usage fetch failed" in result.reason
@@ -228,6 +282,7 @@ def test_run_cycle_github_error_notifies(tmp_path: Path) -> None:
             kind=TaskKind.IMPLEMENTATION, action="x", summary="", url=None, followups=[]
         ),
         notify=posted.append,
+        ensure_container=lambda _: None,
     )
     assert result.executed is False
     assert "issue collection failed" in result.reason
@@ -256,6 +311,7 @@ def test_run_cycle_prioritization_error_notifies(tmp_path: Path) -> None:
             kind=TaskKind.IMPLEMENTATION, action="x", summary="", url=None, followups=[]
         ),
         notify=posted.append,
+        ensure_container=lambda _: None,
     )
     assert result.executed is False
     assert "prioritization failed" in result.reason
@@ -285,6 +341,7 @@ def test_run_cycle_token_expired_uses_dedicated_message(tmp_path: Path) -> None:
             kind=TaskKind.IMPLEMENTATION, action="x", summary="", url=None, followups=[]
         ),
         notify=posted.append,
+        ensure_container=lambda _: None,
     )
     assert result.executed is False
     assert "oauth token expired" in result.reason.lower()
@@ -316,6 +373,7 @@ def test_run_cycle_container_error_notifies(tmp_path: Path) -> None:
         ),
         run_task=run_task,
         notify=posted.append,
+        ensure_container=lambda _: None,
     )
     assert result.executed is False
     assert "container operation failed" in result.reason
@@ -347,6 +405,7 @@ def test_run_cycle_task_execution_error_notifies(tmp_path: Path) -> None:
         ),
         run_task=run_task,
         notify=posted.append,
+        ensure_container=lambda _: None,
     )
     assert result.executed is False
     assert "task execution failed" in result.reason
@@ -376,4 +435,5 @@ def test_run_cycle_propagates_unknown_error(tmp_path: Path) -> None:
             ),
             run_task=run_task,
             notify=lambda _: None,
+            ensure_container=lambda _: None,
         )

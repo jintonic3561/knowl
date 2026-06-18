@@ -12,12 +12,12 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from knowl.claude_runner import ClaudeError
-from knowl.config import AppConfig, RepoConfig
+from knowl.config import AppConfig, ContainerConfig, RepoConfig
 from knowl.container import ContainerError
 from knowl.gate import evaluate_gate
 from knowl.github_client import GitHubError, IssueRef
 from knowl.prioritize import PrioritizationError, PriorityDecision
-from knowl.slack import build_cycle_summary, build_limit_alert
+from knowl.slack import build_cycle_start_notice, build_cycle_summary, build_limit_alert
 from knowl.tasks import TaskExecutionError, TaskOutcome
 from knowl.usage import TokenExpiredError, UsageError, UsageSnapshot
 
@@ -26,6 +26,7 @@ _LOG = logging.getLogger(__name__)
 FetchUsage = Callable[[], UsageSnapshot]
 ListIssues = Callable[[Sequence[RepoConfig]], list[IssueRef]]
 Notify = Callable[[str], None]
+EnsureContainer = Callable[[ContainerConfig], None]
 
 
 class Prioritize(Protocol):
@@ -69,6 +70,7 @@ def run_cycle(
     prioritize: Prioritize,
     run_task: RunTask,
     notify: Notify,
+    ensure_container: EnsureContainer,
 ) -> CycleResult:
     """1 サイクル分の処理を行い結果を返す."""
     try:
@@ -130,6 +132,31 @@ def run_cycle(
         decision.repo,
         decision.number,
         decision.kind.value,
+    )
+
+    # prioritize は cfg.repositories の issue から選ぶので必ず一致するはず。
+    # 一致しない = invariant 違反として上位に伝播させる。
+    repo = next(r for r in cfg.repositories if r.name == decision.repo)
+
+    try:
+        ensure_container(repo.container)
+    except ContainerError as exc:
+        _LOG.warning("container start failed: %s", exc)
+        notify(_build_error_alert("container start", exc))
+        return CycleResult(
+            executed=False,
+            reason=f"container start failed: {exc}",
+            usage=usage,
+            issue=picked,
+            decision=decision,
+        )
+
+    notify(
+        build_cycle_start_notice(
+            repo=decision.repo,
+            issue_number=decision.number,
+            issue_title=picked.title,
+        )
     )
 
     try:
