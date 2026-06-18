@@ -10,8 +10,8 @@
 | 2 | Claude usage API 取得 (5h / 週次) | `knowl.usage` |
 | 3 | 起動ゲート判定 (デフォルト 30% / 10%) | `knowl.gate` |
 | 4 | 全リポ open issue 収集 + Claude 優先度判定 | `knowl.github_client`, `knowl.prioritize` |
-| 5 | 実装タスク → PR / 自動 merge | `templates/implementation.md`, `knowl.tasks` |
-| 6 | 調査タスク → issue コメント | `templates/investigation.md`, `knowl.tasks` |
+| 5 | 実装タスク → PR / 自動 merge (`knowl-implementation` ラベルで明示可) | `templates/implementation.md`, `knowl.tasks` |
+| 6 | 調査タスク → issue コメント (`knowl-investigation` ラベルで明示可) | `templates/investigation.md`, `knowl.tasks` |
 | 7 | 後続タスクの起票 | テンプレ内手順 + `knowl.tasks` |
 | 8 | Slack サマリ通知 / limit アラート | `knowl.slack` |
 
@@ -45,6 +45,8 @@ make logs
 `make` か `make help` でターゲット一覧を確認できる。中身は `docker compose -f docker/docker-compose.yml ...` の薄いラッパなので、素の docker compose を直接使っても同等に動く。
 
 cron は `cron_interval_minutes` 設定 (デフォルト 60 分) に従って `knowl run-once` を起動する。ゲート判定で余裕がなければ no-op で次回まで待機する。
+
+タスクタイプ (実装 / 調査) は issue に専用ラベルを付けると Claude を介さず決定する。`knowl-implementation` / `knowl-investigation` のどちらか一方を付けるとそのタイプで実行される。両方付いている / どちらも無い場合は従来通り Claude 判定にフォールバックする。各リポジトリで `gh label create knowl-implementation` / `gh label create knowl-investigation` で作成しておく。
 
 make start 時は起動直後に 1 サイクル動く。
 

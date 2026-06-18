@@ -22,6 +22,25 @@ class TaskKind(StrEnum):
     INVESTIGATION = "investigation"
 
 
+# 専用ラベル: issue に付与されていれば Claude の判定を上書きして決定的に kind を決める。
+# 両方付いていた場合は矛盾とみなし、 None を返して Claude 判定にフォールバックする。
+IMPLEMENTATION_LABEL = "knowl-implementation"
+INVESTIGATION_LABEL = "knowl-investigation"
+
+
+def task_kind_from_labels(labels: Sequence[str]) -> TaskKind | None:
+    """専用ラベルから TaskKind を決定する。判定できないときは None."""
+    has_impl = IMPLEMENTATION_LABEL in labels
+    has_inv = INVESTIGATION_LABEL in labels
+    if has_impl and has_inv:
+        return None
+    if has_impl:
+        return TaskKind.IMPLEMENTATION
+    if has_inv:
+        return TaskKind.INVESTIGATION
+    return None
+
+
 class PriorityDecision(BaseModel):
     model_config = ConfigDict(frozen=True)
 

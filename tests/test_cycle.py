@@ -293,6 +293,143 @@ def test_run_cycle_happy_path(tmp_path: Path) -> None:
     assert "next" in posted[1]
 
 
+def test_run_cycle_overrides_kind_from_label(tmp_path: Path) -> None:
+    """ラベルが付いた issue では Claude 判定より優先してラベルから kind を決める."""
+    from knowl.prioritize import IMPLEMENTATION_LABEL
+
+    cfg = app_cfg(tmp_path)
+    posted: list[str] = []
+
+    fixture_issue = make_issue(number=1, labels=(IMPLEMENTATION_LABEL,))
+    # Claude が誤って investigation を返してきたケース。
+    fixture_decision = PriorityDecision(
+        repo="acme/widgets",
+        number=1,
+        kind=TaskKind.INVESTIGATION,
+        reason="claude said so",
+    )
+    received: list[PriorityDecision] = []
+
+    def prioritize(
+        issues: list[IssueRef], *, model: str
+    ) -> tuple[PriorityDecision, IssueRef]:
+        return fixture_decision, fixture_issue
+
+    def run_task(
+        cfg: AppConfig, decision: PriorityDecision, issue: IssueRef
+    ) -> TaskOutcome:
+        received.append(decision)
+        return TaskOutcome(
+            kind=decision.kind, action="ok", summary="", url=None, followups=[]
+        )
+
+    result = run_cycle(
+        cfg,
+        fetch_usage=lambda: UsageSnapshot(
+            session_remaining_pct=80, weekly_remaining_pct=80
+        ),
+        list_issues=lambda repos: [fixture_issue],
+        prioritize=prioritize,
+        run_task=run_task,
+        notify=posted.append,
+        ensure_container=lambda _: None,
+    )
+
+    assert result.executed is True
+    assert received and received[0].kind is TaskKind.IMPLEMENTATION
+    assert result.decision is not None
+    assert result.decision.kind is TaskKind.IMPLEMENTATION
+
+
+def test_run_cycle_uses_claude_kind_when_no_label(tmp_path: Path) -> None:
+    """ラベル無しのときは Claude が返した kind をそのまま使う (フォールバック)."""
+    cfg = app_cfg(tmp_path)
+
+    fixture_issue = make_issue(number=1, labels=())
+    fixture_decision = PriorityDecision(
+        repo="acme/widgets",
+        number=1,
+        kind=TaskKind.INVESTIGATION,
+        reason="x",
+    )
+    received: list[PriorityDecision] = []
+
+    def prioritize(
+        issues: list[IssueRef], *, model: str
+    ) -> tuple[PriorityDecision, IssueRef]:
+        return fixture_decision, fixture_issue
+
+    def run_task(
+        cfg: AppConfig, decision: PriorityDecision, issue: IssueRef
+    ) -> TaskOutcome:
+        received.append(decision)
+        return TaskOutcome(
+            kind=decision.kind, action="ok", summary="", url=None, followups=[]
+        )
+
+    result = run_cycle(
+        cfg,
+        fetch_usage=lambda: UsageSnapshot(
+            session_remaining_pct=80, weekly_remaining_pct=80
+        ),
+        list_issues=lambda repos: [fixture_issue],
+        prioritize=prioritize,
+        run_task=run_task,
+        notify=lambda _: None,
+        ensure_container=lambda _: None,
+    )
+
+    assert result.executed is True
+    assert received and received[0].kind is TaskKind.INVESTIGATION
+
+
+def test_run_cycle_falls_back_when_both_labels_present(tmp_path: Path) -> None:
+    """両ラベルが付いていて矛盾しているときは Claude 判定にフォールバック."""
+    from knowl.prioritize import IMPLEMENTATION_LABEL, INVESTIGATION_LABEL
+
+    cfg = app_cfg(tmp_path)
+
+    fixture_issue = make_issue(
+        number=1, labels=(IMPLEMENTATION_LABEL, INVESTIGATION_LABEL)
+    )
+    fixture_decision = PriorityDecision(
+        repo="acme/widgets",
+        number=1,
+        kind=TaskKind.INVESTIGATION,
+        reason="claude tiebreaker",
+    )
+    received: list[PriorityDecision] = []
+
+    def prioritize(
+        issues: list[IssueRef], *, model: str
+    ) -> tuple[PriorityDecision, IssueRef]:
+        return fixture_decision, fixture_issue
+
+    def run_task(
+        cfg: AppConfig, decision: PriorityDecision, issue: IssueRef
+    ) -> TaskOutcome:
+        received.append(decision)
+        return TaskOutcome(
+            kind=decision.kind, action="ok", summary="", url=None, followups=[]
+        )
+
+    result = run_cycle(
+        cfg,
+        fetch_usage=lambda: UsageSnapshot(
+            session_remaining_pct=80, weekly_remaining_pct=80
+        ),
+        list_issues=lambda repos: [fixture_issue],
+        prioritize=prioritize,
+        run_task=run_task,
+        notify=lambda _: None,
+        ensure_container=lambda _: None,
+    )
+
+    assert result.executed is True
+    # 両ラベル付きは矛盾。 Claude の判定をそのまま使う。
+    assert received and received[0].kind is TaskKind.INVESTIGATION
+
+
 def test_run_cycle_container_start_failure_notifies(tmp_path: Path) -> None:
     cfg = app_cfg(tmp_path)
     posted: list[str] = []

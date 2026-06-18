@@ -7,6 +7,8 @@ import pytest
 from knowl.claude_runner import ClaudeResult
 from knowl.github_client import IssueRef
 from knowl.prioritize import (
+    IMPLEMENTATION_LABEL,
+    INVESTIGATION_LABEL,
     NoActionableIssue,
     PrioritizationError,
     PriorityDecision,
@@ -14,6 +16,7 @@ from knowl.prioritize import (
     build_prioritization_prompt,
     parse_priority_response,
     pick_priority,
+    task_kind_from_labels,
 )
 
 
@@ -134,6 +137,42 @@ def test_parse_priority_response_actionable_false_default_reason() -> None:
     result = parse_priority_response(text)
     assert isinstance(result, NoActionableIssue)
     assert result.reason  # 空でも何らかのフォールバック
+
+
+def test_task_kind_from_labels_implementation() -> None:
+    assert task_kind_from_labels((IMPLEMENTATION_LABEL,)) is TaskKind.IMPLEMENTATION
+
+
+def test_task_kind_from_labels_investigation() -> None:
+    assert task_kind_from_labels((INVESTIGATION_LABEL,)) is TaskKind.INVESTIGATION
+
+
+def test_task_kind_from_labels_picks_dedicated_label_among_others() -> None:
+    assert (
+        task_kind_from_labels(("bug", "priority:high", INVESTIGATION_LABEL))
+        is TaskKind.INVESTIGATION
+    )
+
+
+def test_task_kind_from_labels_no_dedicated_label() -> None:
+    assert task_kind_from_labels(("bug", "enhancement")) is None
+
+
+def test_task_kind_from_labels_empty() -> None:
+    assert task_kind_from_labels(()) is None
+
+
+def test_task_kind_from_labels_both_labels_returns_none() -> None:
+    # 矛盾している場合は決定できないので、エージェント判定にフォールバックさせる。
+    assert (
+        task_kind_from_labels((IMPLEMENTATION_LABEL, INVESTIGATION_LABEL)) is None
+    )
+
+
+def test_dedicated_labels_are_distinct_and_non_empty() -> None:
+    assert IMPLEMENTATION_LABEL
+    assert INVESTIGATION_LABEL
+    assert IMPLEMENTATION_LABEL != INVESTIGATION_LABEL
 
 
 def test_pick_priority_returns_no_actionable() -> None:
