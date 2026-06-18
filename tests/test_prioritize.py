@@ -7,6 +7,7 @@ import pytest
 from knowl.claude_runner import ClaudeResult
 from knowl.github_client import IssueRef
 from knowl.prioritize import (
+    NoActionableIssue,
     PrioritizationError,
     PriorityDecision,
     TaskKind,
@@ -59,6 +60,7 @@ def test_parse_priority_response_with_code_fence() -> None:
 done.
 """
     decision = parse_priority_response(text)
+    assert isinstance(decision, PriorityDecision)
     assert decision.kind is TaskKind.INVESTIGATION
     assert decision.number == 3
 
@@ -84,7 +86,9 @@ def test_pick_priority_uses_runner_and_matches_issue() -> None:
             payload={},
         )
 
-    decision, picked = pick_priority(issues, runner=runner, model="claude-opus-4-7")
+    result = pick_priority(issues, runner=runner, model="claude-opus-4-7")
+    assert isinstance(result, tuple)
+    decision, picked = result
     assert decision.number == 2
     assert picked.number == 2
     assert picked.title == "bug"
@@ -109,3 +113,38 @@ def test_pick_priority_empty_issues_raises() -> None:
 
     with pytest.raises(PrioritizationError):
         pick_priority([], runner=runner, model="claude-opus-4-7")
+
+
+def test_build_prompt_offers_no_actionable_option() -> None:
+    # プロンプトに「全件 review/TODO 待ちなら no-op を返してよい」旨が含まれること。
+    prompt = build_prioritization_prompt([issue()])
+    assert "actionable" in prompt
+    assert "false" in prompt
+
+
+def test_parse_priority_response_actionable_false_returns_idle() -> None:
+    text = '{"actionable": false, "reason": "all blocked on review"}'
+    result = parse_priority_response(text)
+    assert isinstance(result, NoActionableIssue)
+    assert "review" in result.reason
+
+
+def test_parse_priority_response_actionable_false_default_reason() -> None:
+    text = '{"actionable": false}'
+    result = parse_priority_response(text)
+    assert isinstance(result, NoActionableIssue)
+    assert result.reason  # 空でも何らかのフォールバック
+
+
+def test_pick_priority_returns_no_actionable() -> None:
+    issues = [issue(number=1)]
+
+    def runner(prompt: str, *, model: str) -> ClaudeResult:
+        return ClaudeResult(
+            text='{"actionable": false, "reason": "all waiting for review"}',
+            payload={},
+        )
+
+    result = pick_priority(issues, runner=runner, model="claude-opus-4-7")
+    assert isinstance(result, NoActionableIssue)
+    assert "review" in result.reason

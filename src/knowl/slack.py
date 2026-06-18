@@ -108,3 +108,8 @@ def build_cycle_summary(
 def build_limit_alert(reason: str) -> str:
     """Claude limit 到達時のアラート文字列."""
     return f"⚠️ Claude Code limit reached: {reason}"
+
+
+def build_idle_notice(reason: str) -> str:
+    """進めるべき issue がないときの簡潔な通知."""
+    return f"💤 knowl: 進めるべき issue なし — {reason}"

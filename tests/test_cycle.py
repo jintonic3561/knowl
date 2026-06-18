@@ -76,6 +76,7 @@ def test_run_cycle_no_op_when_gate_blocks(tmp_path: Path) -> None:
 
 def test_run_cycle_no_op_when_no_issues(tmp_path: Path) -> None:
     cfg = app_cfg(tmp_path)
+    posted: list[str] = []
     result = run_cycle(
         cfg,
         fetch_usage=lambda: UsageSnapshot(
@@ -91,11 +92,47 @@ def test_run_cycle_no_op_when_no_issues(tmp_path: Path) -> None:
         run_task=lambda *a, **kw: TaskOutcome(
             kind=TaskKind.IMPLEMENTATION, action="x", summary="", url=None, followups=[]
         ),
-        notify=lambda _: None,
+        notify=posted.append,
         ensure_container=lambda _: None,
     )
     assert result.executed is False
     assert "no open issues" in result.reason
+    # 「進めるべき issue がない」旨を Slack に流す
+    assert len(posted) == 1
+    assert "issue" in posted[0].lower() or "進めるべき" in posted[0]
+
+
+def test_run_cycle_no_op_when_no_actionable_issue(tmp_path: Path) -> None:
+    from knowl.prioritize import NoActionableIssue
+
+    cfg = app_cfg(tmp_path)
+    posted: list[str] = []
+
+    def prioritize(
+        issues: list[IssueRef], *, model: str
+    ) -> tuple[PriorityDecision, IssueRef] | NoActionableIssue:
+        return NoActionableIssue(reason="all waiting for human review")
+
+    result = run_cycle(
+        cfg,
+        fetch_usage=lambda: UsageSnapshot(
+            session_remaining_pct=80, weekly_remaining_pct=80
+        ),
+        list_issues=lambda repos: [make_issue()],
+        prioritize=prioritize,
+        run_task=lambda *a, **kw: pytest.fail(  # pragma: no cover
+            "run_task must not be invoked when no actionable issue"
+        ),
+        notify=posted.append,
+        ensure_container=lambda _: pytest.fail(  # pragma: no cover
+            "container must not be ensured when no actionable issue"
+        ),
+    )
+    assert result.executed is False
+    assert "no actionable issue" in result.reason.lower()
+    assert "all waiting for human review" in result.reason
+    assert len(posted) == 1
+    assert "waiting" in posted[0].lower() or "review" in posted[0].lower()
 
 
 def test_run_cycle_happy_path(tmp_path: Path) -> None:

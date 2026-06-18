@@ -16,8 +16,13 @@ from knowl.config import AppConfig, ContainerConfig, RepoConfig
 from knowl.container import ContainerError
 from knowl.gate import evaluate_gate
 from knowl.github_client import GitHubError, IssueRef
-from knowl.prioritize import PrioritizationError, PriorityDecision
-from knowl.slack import build_cycle_start_notice, build_cycle_summary, build_limit_alert
+from knowl.prioritize import NoActionableIssue, PrioritizationError, PriorityDecision
+from knowl.slack import (
+    build_cycle_start_notice,
+    build_cycle_summary,
+    build_idle_notice,
+    build_limit_alert,
+)
 from knowl.tasks import TaskExecutionError, TaskOutcome
 from knowl.usage import TokenExpiredError, UsageError, UsageSnapshot
 
@@ -35,7 +40,7 @@ class Prioritize(Protocol):
         issues: list[IssueRef],
         *,
         model: str,
-    ) -> tuple[PriorityDecision, IssueRef]: ...
+    ) -> tuple[PriorityDecision, IssueRef] | NoActionableIssue: ...
 
 
 class RunTask(Protocol):
@@ -103,10 +108,11 @@ def run_cycle(
         )
     if not issues:
         _LOG.info("no open issues across registered repositories")
+        notify(build_idle_notice("open issue が見つからない"))
         return CycleResult(executed=False, reason="no open issues", usage=usage)
 
     try:
-        decision, picked = prioritize(issues, model=cfg.model)
+        prioritized = prioritize(issues, model=cfg.model)
     except PrioritizationError as exc:
         _LOG.warning("prioritization failed: %s", exc)
         notify(_build_error_alert("prioritization", exc))
@@ -127,6 +133,16 @@ def run_cycle(
         return CycleResult(
             executed=False, reason=f"prioritization claude error: {exc}", usage=usage
         )
+
+    if isinstance(prioritized, NoActionableIssue):
+        _LOG.info("no actionable issue: %s", prioritized.reason)
+        notify(build_idle_notice(prioritized.reason))
+        return CycleResult(
+            executed=False,
+            reason=f"no actionable issue: {prioritized.reason}",
+            usage=usage,
+        )
+    decision, picked = prioritized
     _LOG.info(
         "prioritized %s#%d as %s",
         decision.repo,

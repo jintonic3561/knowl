@@ -10,6 +10,7 @@ from knowl.slack import (
     SlackNotifier,
     build_cycle_start_notice,
     build_cycle_summary,
+    build_idle_notice,
     build_limit_alert,
 )
 
@@ -57,6 +58,16 @@ def test_build_limit_alert_mentions_limit() -> None:
     text = build_limit_alert("weekly limit reached")
     assert "limit" in text.lower()
     assert "weekly limit reached" in text
+
+
+def test_build_idle_notice_carries_reason() -> None:
+    text = build_idle_notice("open issue が見つからない")
+    assert "open issue が見つからない" in text
+    # 1 行に収める
+    assert "\n" not in text
+    # 他の通知と視覚的に区別できる prefix
+    assert text[0] != "✅"
+    assert text[0] != "▶"
 
 
 def test_notifier_posts_when_token_present() -> None:
