@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol
 
@@ -30,6 +31,13 @@ class PriorityDecision(BaseModel):
     reason: str = ""
 
 
+@dataclass(frozen=True, slots=True)
+class NoActionableIssue:
+    """候補 issue は存在するが、いま着手すべきものは無いという判定."""
+
+    reason: str
+
+
 class PrioritizationError(RuntimeError):
     """優先度判定の失敗."""
 
@@ -46,7 +54,12 @@ _PROMPT_HEADER = (
     '{"repo": "<owner/repo>", "number": <int>, '
     '"kind": "implementation"|"investigation", "reason": "<short>"}.\n'
     "Do not wrap the JSON in commentary. The chosen (repo, number) MUST exactly match one of "
-    "the candidates below.\n\n"
+    "the candidates below.\n"
+    "If NONE of the candidates is actionable right now (e.g. all are explicitly blocked "
+    "waiting for human review, paused on a TODO/discussion, or otherwise marked as not ready), "
+    'reply instead with {"actionable": false, "reason": "<short>"} and nothing else. '
+    "Default to picking an issue; only return actionable=false when every candidate is "
+    "clearly not ready to be worked on.\n\n"
     "Candidates:\n"
 )
 
@@ -67,11 +80,17 @@ def build_prioritization_prompt(issues: Sequence[IssueRef]) -> str:
     return "\n".join(lines)
 
 
-def parse_priority_response(text: str) -> PriorityDecision:
-    """Claude 返答テキストから JSON を抽出し PriorityDecision を組み立てる."""
+_NO_ACTIONABLE_DEFAULT_REASON = "Claude reported no actionable issue"
+
+
+def parse_priority_response(text: str) -> PriorityDecision | NoActionableIssue:
+    """Claude 返答テキストから JSON を抽出し、Decision または no-op 判定を返す."""
     payload = extract_first_json_object(text)
     if payload is None:
         raise PrioritizationError("no JSON object found in priority response")
+    if payload.get("actionable") is False:
+        reason = str(payload.get("reason") or "").strip() or _NO_ACTIONABLE_DEFAULT_REASON
+        return NoActionableIssue(reason=reason)
     try:
         return PriorityDecision.model_validate(payload)
     except ValidationError as exc:
@@ -87,17 +106,23 @@ def pick_priority(
     *,
     runner: ClaudeRunner | None = None,
     model: str,
-) -> tuple[PriorityDecision, IssueRef]:
-    """issue 群から最優先 1 件を選び、Decision とマッチした IssueRef を返す."""
+) -> tuple[PriorityDecision, IssueRef] | NoActionableIssue:
+    """issue 群から最優先 1 件を選び、Decision とマッチした IssueRef を返す.
+
+    Claude が「全て review/TODO 待ちで着手すべき issue なし」と判定した場合は
+    ``NoActionableIssue`` を返す。
+    """
     if not issues:
         raise PrioritizationError("no issues to prioritize")
     runner_fn: ClaudeRunner = runner or _default_runner
     prompt = build_prioritization_prompt(issues)
     result = runner_fn(prompt, model=model)
-    decision = parse_priority_response(result.text)
+    parsed = parse_priority_response(result.text)
+    if isinstance(parsed, NoActionableIssue):
+        return parsed
     for issue in issues:
-        if issue.repo == decision.repo and issue.number == decision.number:
-            return decision, issue
+        if issue.repo == parsed.repo and issue.number == parsed.number:
+            return parsed, issue
     raise PrioritizationError(
-        f"prioritized issue {decision.repo}#{decision.number} not found in candidate list"
+        f"prioritized issue {parsed.repo}#{parsed.number} not found in candidate list"
     )

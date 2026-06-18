@@ -15,7 +15,7 @@ from knowl.container import ensure_running
 from knowl.cycle import CycleResult, run_cycle
 from knowl.github_client import IssueRef, list_open_issues
 from knowl.keepalive import DEFAULT_THRESHOLD_MS, DEFAULT_TIMEOUT_S, keepalive_once
-from knowl.prioritize import PriorityDecision, pick_priority
+from knowl.prioritize import NoActionableIssue, PriorityDecision, pick_priority
 from knowl.slack import SlackNotifier
 from knowl.tasks import TaskOutcome
 from knowl.tasks import run_task as run_task_impl
@@ -79,7 +79,7 @@ def _list_issues(repos: Sequence[RepoConfig]) -> list[IssueRef]:
 
 def _prioritize(
     issues: list[IssueRef], *, model: str
-) -> tuple[PriorityDecision, IssueRef]:
+) -> tuple[PriorityDecision, IssueRef] | NoActionableIssue:
     return pick_priority(issues, model=model)
 
 
