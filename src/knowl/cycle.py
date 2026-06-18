@@ -17,7 +17,14 @@ from knowl.container import ContainerError
 from knowl.filters import exclude_blocked_issues
 from knowl.gate import evaluate_gate
 from knowl.github_client import GitHubError, IssueRef
-from knowl.prioritize import NoActionableIssue, PrioritizationError, PriorityDecision
+from knowl.prioritize import (
+    IMPLEMENTATION_LABEL,
+    INVESTIGATION_LABEL,
+    NoActionableIssue,
+    PrioritizationError,
+    PriorityDecision,
+    task_kind_from_labels,
+)
 from knowl.slack import (
     build_cycle_start_notice,
     build_cycle_summary,
@@ -153,6 +160,27 @@ def run_cycle(
             usage=usage,
         )
     decision, picked = prioritized
+    label_kind = task_kind_from_labels(picked.labels)
+    if label_kind is not None and label_kind is not decision.kind:
+        _LOG.info(
+            "overriding kind from label: %s -> %s for %s#%d",
+            decision.kind.value,
+            label_kind.value,
+            decision.repo,
+            decision.number,
+        )
+        decision = decision.model_copy(update={"kind": label_kind})
+    elif (
+        label_kind is None
+        and IMPLEMENTATION_LABEL in picked.labels
+        and INVESTIGATION_LABEL in picked.labels
+    ):
+        _LOG.warning(
+            "conflicting kind labels on %s#%d, falling back to claude kind=%s",
+            decision.repo,
+            decision.number,
+            decision.kind.value,
+        )
     _LOG.info(
         "prioritized %s#%d as %s",
         decision.repo,
