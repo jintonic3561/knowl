@@ -7,6 +7,7 @@ devcontainer であっても起動済みのコンテナを対象に ``docker exe
 
 from __future__ import annotations
 
+import shlex
 import subprocess
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -78,13 +79,21 @@ def exec_in_container(
     """コンテナ内でコマンドを実行する(停止していれば自動起動)."""
     ensure_running(container)
     cmd: list[str] = ["docker", "exec"]
+    if container.user:
+        cmd.extend(["--user", container.user])
     if workdir:
         cmd.extend(["-w", workdir])
     if env:
         for key, value in env.items():
             cmd.extend(["-e", f"{key}={value}"])
     cmd.append(container.name)
-    cmd.extend(argv)
+    if container.user:
+        # 非 root user の home 配下にしか PATH が通らないバイナリ
+        # (例: devcontainer の ~/.local/bin/claude) を呼べるよう login shell でラップ。
+        # argv は shlex.join で安全にエスケープ。
+        cmd.extend(["bash", "-lc", shlex.join(argv)])
+    else:
+        cmd.extend(argv)
     try:
         result = subprocess.run(
             cmd,

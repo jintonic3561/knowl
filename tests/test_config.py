@@ -140,6 +140,38 @@ def test_repo_config_helpers() -> None:
     assert repo.repo == "widgets"
 
 
+def test_container_user_defaults_to_none(tmp_path: Path) -> None:
+    cfg_path = write(
+        tmp_path,
+        """
+        repositories:
+          - name: a/b
+            container:
+              kind: docker
+              name: c
+        """,
+    )
+    cfg = load_config(cfg_path)
+    assert cfg.repositories[0].container.user is None
+
+
+def test_container_user_can_be_specified(tmp_path: Path) -> None:
+    cfg_path = write(
+        tmp_path,
+        """
+        repositories:
+          - name: a/b
+            container:
+              kind: devcontainer
+              name: b-dev
+              workdir: /workspaces/b
+              user: vscode
+        """,
+    )
+    cfg = load_config(cfg_path)
+    assert cfg.repositories[0].container.user == "vscode"
+
+
 def test_cron_interval_minutes_invalid_non_multiple_rejected(tmp_path: Path) -> None:
     cfg_path = write(
         tmp_path,

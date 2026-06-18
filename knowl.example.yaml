@@ -21,3 +21,7 @@ repositories:
       kind: docker            # docker | devcontainer
       name: your-repo-dev
       workdir: /workspace
+      # user: vscode          # docker exec --user に渡す。devcontainer の remoteUser
+      #                       # (vscode / node / ubuntu 等) に claude をインストール
+      #                       # している場合は指定する。指定時は bash -lc 経由で起動し、
+      #                       # 対象 user の .bashrc / .profile で PATH が拾われる。

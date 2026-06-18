@@ -29,6 +29,9 @@ class ContainerConfig(BaseModel):
     kind: ContainerKind
     name: str = Field(min_length=1)
     workdir: Path = Path("/workspace")
+    # devcontainer の remoteUser (vscode / node 等) を docker exec --user に渡す。
+    # 未指定なら root 実行。
+    user: str | None = Field(default=None, min_length=1)
 
 
 class RepoConfig(BaseModel):

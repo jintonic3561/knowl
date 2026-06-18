@@ -50,6 +50,8 @@ Knowl は `docker exec <target> claude -p ...` で対象リポジトリ containe
 
 Knowl は `claude -p` に既定で `--dangerously-skip-permissions` を付ける。これは「対象 container はサンドボックスである」前提に基づく。container の隔離設計が不十分な場合は、自前ラッパで `--allowed-tools` 制限などに置き換えること。
 
+devcontainer は root 以外 (`vscode` / `node` / `ubuntu` など) をメインユーザにしているのが普通で、`claude` も大抵そのユーザの home 配下 (`~/.local/bin/claude` 等) にインストールされる。`docker exec` は既定で root + 非ログインシェルで動くため、`~/.local/bin` が PATH に乗らず `claude: executable file not found in $PATH` で失敗する。`container.user` を設定すれば、Knowl は `docker exec --user <user> ... bash -lc <argv>` でログインシェル経由で起動するので、対象 user の `.bashrc` / `.profile` が読み込まれて PATH が通る (`bash` が入っている前提)。
+
 ## ローカル開発
 
 ```bash
@@ -79,6 +81,8 @@ repositories:
       kind: docker            # docker | devcontainer (どちらも docker exec で扱う)
       name: container-name
       workdir: /workspace
+      # user: vscode          # docker exec --user に渡す (任意)。
+      #                       # devcontainer の remoteUser で claude を入れている場合に指定。
 ```
 
 ## 状況

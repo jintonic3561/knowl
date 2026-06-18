@@ -154,6 +154,7 @@
           <tr><td>Minor (3周目)</td><td>cron job env が <code>/etc/environment</code> 依存</td><td><code>/etc/cron.d/knowl</code> 冒頭に <code>KEY=VALUE</code> を直書きし vixie cron が直接読む形に変更</td></tr>
           <tr><td>Major (実機)</td><td>credentials を <code>.credentials.json</code> ファイル単位で bind mount しており Claude CLI の atomic rename 更新を反映できない (コンテナは古い inode を見続ける)</td><td><code>docker-compose.yml</code> を <code>~/.claude</code> ディレクトリ単位の bind mount に変更</td></tr>
           <tr><td>Major (実機)</td><td><code>/etc/cron.d/knowl</code> 冒頭の <code>KEY=VALUE</code> 直書きで <code>SLACK_BOT_TOKEN</code>/<code>GH_TOKEN</code> が平文露出 (cat 一発で漏れる)</td><td>非機密のみ <code>/etc/cron.d/knowl</code> に残し、機密は <code>install -m 0600</code> で生成した <code>/etc/knowl/secrets.env</code> に切り出し <code>run-cycle.sh</code> で <code>source</code></td></tr>
+          <tr><td>Major (実機)</td><td>devcontainer のメインユーザ (<code>vscode</code> 等) に <code>claude</code> がインストールされていると、<code>docker exec</code> が既定で root + 非ログインシェル実行のため <code>~/.local/bin</code> が PATH に乗らず <code>executable file not found in $PATH</code> で exit 127</td><td><code>ContainerConfig</code> に <code>user</code> フィールドを追加し、指定時は <code>docker exec --user &lt;user&gt; ... bash -lc &lt;argv&gt;</code> でログインシェル経由に切替 (argv は <code>shlex.join</code> で安全エスケープ)。<code>knowl.example.yaml</code> / <code>README</code> も追随</td></tr>
         </tbody>
       </table>
     </section>
@@ -163,7 +164,7 @@
       <ul>
         <li>WSL2 上で Docker 疎通確認済 (knowl コンテナ → docker.sock 経由で対象 devcontainer に <code>docker exec</code>、stockbot#67 investigation サイクルが Slack 通知まで完走)。</li>
         <li>対象 devcontainer (例: <code>stockbot-dev</code>) を VSCode の Dev Containers 拡張で開いている間、knowl の cycle 実行中に拡張が devcontainer に SIGTERM を送って exit させるケースを観測。entrypoint の <code>trap "exit 0" 15</code> で正常終了するため <code>docker exec</code> 側は 137 を返す。回避策: knowl 実行中は VSCode を閉じる、または <code>devcontainer.json</code> の <code>shutdownAction: "none"</code> を検討。</li>
-        <li>対象 devcontainer 内の Claude Code には別途認証が必要 (knowl の credentials は中継しない)。未ログイン時は <code>Not logged in · Please run /login</code> で exit 1。ホスト側 <code>~/.claude</code> を devcontainer に bind するか手動 <code>claude /login</code> 運用。</li>
+        <li>対象 devcontainer 内の Claude Code には別途認証が必要 (knowl の credentials は中継しない)。未ログイン時は <code>Not logged in · Please run /login</code> で exit 1。ホスト側 <code>~/.claude</code> を devcontainer に bind するか手動 <code>claude /login</code> 運用。さらに <code>claude</code> がメインユーザ (<code>vscode</code> 等) の home 配下にしか入っていない場合、<code>knowl.yaml</code> の対象 entry に <code>container.user: vscode</code> を設定して <code>docker exec --user</code> を通すこと。</li>
         <li>Claude usage API のレスポンス形状は仕様不確定。<code>knowl.usage.parse_usage_payload</code> は <code>utilization</code>/<code>used_percent</code>/<code>remaining_percent</code>/<code>remaining+limit</code> をフォールバック処理する形で頑健化済。</li>
         <li>OAuth トークンの自動 refresh は実装せず、期限切れ時は <code>TokenExpiredError</code> で Slack 通知 + 当該サイクル no-op。ホスト側で <code>claude</code> を実行して credentials.json を更新する運用前提 (ディレクトリマウントなので knowl コンテナは再起動不要)。</li>
         <li>devcontainer kind は <code>docker exec</code> で扱う簡略実装。devcontainers CLI が必要な特殊運用には未対応。</li>

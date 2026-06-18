@@ -37,12 +37,12 @@ class RunRecorder:
         return subprocess.CompletedProcess(args=list(cmd), returncode=rc, stdout=out, stderr=err)
 
 
-def docker_cfg(name: str = "widgets-dev") -> ContainerConfig:
-    return ContainerConfig(kind=ContainerKind.DOCKER, name=name)
+def docker_cfg(name: str = "widgets-dev", user: str | None = None) -> ContainerConfig:
+    return ContainerConfig(kind=ContainerKind.DOCKER, name=name, user=user)
 
 
-def devcontainer_cfg(name: str = "widgets-dev") -> ContainerConfig:
-    return ContainerConfig(kind=ContainerKind.DEVCONTAINER, name=name)
+def devcontainer_cfg(name: str = "widgets-dev", user: str | None = None) -> ContainerConfig:
+    return ContainerConfig(kind=ContainerKind.DEVCONTAINER, name=name, user=user)
 
 
 def test_ensure_running_skips_start_when_already_running(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -130,3 +130,51 @@ def test_exec_in_container_supports_env(monkeypatch: pytest.MonkeyPatch) -> None
     flat = rec.calls[1]
     assert "-e" in flat
     assert "FOO=bar" in flat
+
+
+def test_exec_in_container_passes_user_flag_and_wraps_login_shell(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rec = RunRecorder([(0, "true\n", ""), (0, "", "")])
+    monkeypatch.setattr(subprocess, "run", rec)
+
+    exec_in_container(devcontainer_cfg(user="vscode"), ["claude", "-p"], workdir="/work")
+
+    flat = rec.calls[1]
+    assert "--user" in flat
+    idx = flat.index("--user")
+    assert flat[idx + 1] == "vscode"
+    # user 指定時は bash -lc 経由で argv を1引数に joined して渡す
+    assert flat[-3:] == ["bash", "-lc", "claude -p"]
+
+
+def test_exec_in_container_login_shell_quotes_unsafe_argv(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rec = RunRecorder([(0, "true\n", ""), (0, "", "")])
+    monkeypatch.setattr(subprocess, "run", rec)
+
+    exec_in_container(
+        devcontainer_cfg(user="vscode"),
+        ["claude", "-p", "fix; rm -rf /", "--flag"],
+        workdir="/work",
+    )
+
+    flat = rec.calls[1]
+    # 危険文字を含む引数が shlex.join でクォートされ、シェル解釈で展開されないこと
+    joined = flat[-1]
+    assert "'fix; rm -rf /'" in joined
+    assert flat[-3:-1] == ["bash", "-lc"]
+
+
+def test_exec_in_container_omits_user_flag_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    rec = RunRecorder([(0, "true\n", ""), (0, "", "")])
+    monkeypatch.setattr(subprocess, "run", rec)
+
+    exec_in_container(docker_cfg(), ["echo", "hi"], workdir="/work")
+
+    flat = rec.calls[1]
+    assert "--user" not in flat
+    # user 未指定時は shell wrap なし。argv 末尾そのまま。
+    assert flat[-2:] == ["echo", "hi"]
+    assert "bash" not in flat
