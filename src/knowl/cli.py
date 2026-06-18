@@ -13,12 +13,15 @@ import click
 from knowl.config import AppConfig, ConfigError, RepoConfig, load_config
 from knowl.cycle import CycleResult, run_cycle
 from knowl.github_client import IssueRef, list_open_issues
+from knowl.keepalive import DEFAULT_THRESHOLD_MS, DEFAULT_TIMEOUT_S, keepalive_once
 from knowl.prioritize import PriorityDecision, pick_priority
 from knowl.slack import SlackNotifier
 from knowl.tasks import TaskOutcome
 from knowl.tasks import run_task as run_task_impl
 from knowl.usage import (
+    DEFAULT_CREDENTIALS_PATH,
     TokenExpiredError,
+    UsageError,
     UsageSnapshot,
     fetch_usage,
     load_oauth_credentials,
@@ -136,6 +139,54 @@ def run_once(config_path: Path, credentials_path: Path | None) -> None:
         click.echo(f"no-op: {result.reason}")
         return
     click.echo(f"done: {result.reason}")
+
+
+@main.command("keepalive")
+@click.option(
+    "--credentials",
+    "credentials_path",
+    default=None,
+    type=click.Path(dir_okay=False, path_type=Path),
+    help="~/.claude/.credentials.json の代替パス.",
+)
+@click.option(
+    "--threshold-hours",
+    default=DEFAULT_THRESHOLD_MS / 3_600_000,
+    show_default=True,
+    type=click.FloatRange(min=0.0),
+    help="残り寿命がこの値未満なら refresh を走らせる (時間単位).",
+)
+@click.option(
+    "--timeout-seconds",
+    default=DEFAULT_TIMEOUT_S,
+    show_default=True,
+    type=click.FloatRange(min=1.0),
+    help="claude 呼び出しのタイムアウト (秒).",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="判定のみ行い claude を起動しない.",
+)
+def keepalive(
+    credentials_path: Path | None,
+    threshold_hours: float,
+    timeout_seconds: float,
+    dry_run: bool,
+) -> None:
+    """OAuth トークンを必要に応じて refresh する (cron 呼び出し想定)."""
+    threshold_ms = int(threshold_hours * 3_600_000)
+    try:
+        result = keepalive_once(
+            credentials_path=credentials_path or DEFAULT_CREDENTIALS_PATH,
+            threshold_ms=threshold_ms,
+            dry_run=dry_run,
+            timeout_s=timeout_seconds,
+        )
+    except UsageError as exc:
+        click.echo(f"keepalive failed: {exc}", err=True)
+        sys.exit(1)
+    click.echo(result.reason)
 
 
 if __name__ == "__main__":  # pragma: no cover

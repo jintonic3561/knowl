@@ -48,6 +48,24 @@ cron は `cron_interval_minutes` 設定 (デフォルト 60 分) に従って `k
 
 make start 時は起動直後に 1 サイクル動く。
 
+### OAuth トークンの自動 refresh (host 側 keepalive)
+
+Claude Code の OAuth access token は概ね 8h で expire する。夜間も走らせる前提だと寝てる間に切れて翌朝まで no-op を続けるので、host 側の cron でトークンを保たせる仕組みを別途用意している。
+
+```bash
+make keepalive-start    # crontab に登録 (デフォルト */30 * * * *)
+make keepalive-status   # 登録状況の確認
+make keepalive-now      # 即時実行 (cron を待たない動作確認)
+make keepalive-logs     # .logs/keepalive.log を tail
+make keepalive-stop     # 登録解除
+```
+
+中身は `scripts/keepalive.sh` → `uv run knowl keepalive`。`~/.claude/.credentials.json` の `expiresAt` を見て、残り寿命が閾値 (デフォルト 2h) を切ったときだけ `claude -p ok` を叩く。これにより Claude Code CLI が refreshToken で access token を更新し、ファイルが書き換わる。コンテナ側は `~/.claude` を ro bind mount しているのでそのまま新しいトークンを読む (再ビルド・再起動不要)。
+
+- refresh が走るのは閾値割れ時だけなので、API 消費は 1 日数回 (~$0.1 オーダ)。
+- 周期や閾値は上書き可: `make keepalive-start KEEPALIVE_CRON='*/15 * * * *'`、`scripts/keepalive.sh --threshold-hours 1`。
+- 動作ログは `.logs/keepalive.log`。
+
 ### 対象リポジトリ container 側で必要な前提
 
 Knowl は `docker exec <target> claude -p ...` で対象リポジトリ container 内の Claude を起動するだけで、credentials の中継は一切しない。対象 container 側で:
