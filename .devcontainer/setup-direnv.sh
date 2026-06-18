@@ -5,8 +5,17 @@ set -euo pipefail
 WORKSPACE_DIR="${1:-$(pwd)}"
 
 if ! command -v direnv >/dev/null 2>&1; then
-  sudo apt-get update
-  sudo apt-get install -y --no-install-recommends direnv
+  # devcontainer は root 起動なので通常 sudo は不要だが、将来 remoteUser を変えても動くようガードする。
+  if [ "$(id -u)" -eq 0 ]; then
+    SUDO=""
+  elif command -v sudo >/dev/null 2>&1; then
+    SUDO="sudo"
+  else
+    echo "direnv のインストールに root か sudo が必要" >&2
+    exit 1
+  fi
+  ${SUDO} apt-get update
+  ${SUDO} apt-get install -y --no-install-recommends direnv
 fi
 
 ensure_hook() {
