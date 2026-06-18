@@ -7,7 +7,9 @@ Pro/Max subscription の OAuth トークンを使い、 ``/api/oauth/usage`` か
 from __future__ import annotations
 
 import json
+import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -15,10 +17,17 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
+_LOG = logging.getLogger(__name__)
+
 USAGE_ENDPOINT = "https://api.anthropic.com/api/oauth/usage"
 USER_AGENT = "claude-code/2.0.31"
 ANTHROPIC_BETA = "oauth-2025-04-20"
 DEFAULT_CREDENTIALS_PATH = Path.home() / ".claude" / ".credentials.json"
+
+# 一過性ネットワークエラー (Server disconnected / 短時間 5xx) を救う最低限のリトライ。
+# 攻めすぎると per-cycle 失敗のフィードバックが遅れるので、控えめに 2 回 / 計 3 試行。
+# 試行回数の単一源は ``len(retry_backoffs_s) + 1``。
+DEFAULT_RETRY_BACKOFFS_S: tuple[float, ...] = (1.0, 4.0)
 
 
 class UsageError(RuntimeError):
@@ -112,42 +121,91 @@ def load_oauth_credentials(
     raise UsageError("could not locate access token in credentials file")
 
 
+def _sleep(seconds: float) -> None:
+    """テストから差し替えやすいよう time.sleep を薄く包む."""
+    time.sleep(seconds)
+
+
 def fetch_usage(
     token: str,
     *,
     client: httpx.Client | None = None,
     timeout: float = 10.0,
+    retry_backoffs_s: tuple[float, ...] = DEFAULT_RETRY_BACKOFFS_S,
+    sleep: Callable[[float], None] | None = None,
 ) -> UsageSnapshot:
-    """usage API を呼び、UsageSnapshot を返す."""
+    """usage API を呼び、UsageSnapshot を返す.
+
+    ``Server disconnected`` のような一過性のネットワークエラーと 5xx は
+    ``retry_backoffs_s`` の長さ分だけリトライする。401 などの永続エラーは
+    即終了し再試行しない。
+    """
     owns_client = client is None
     http = client or httpx.Client(timeout=timeout)
+    sleep_fn = sleep if sleep is not None else _sleep
+    attempts = len(retry_backoffs_s) + 1
     try:
-        resp = http.get(
-            USAGE_ENDPOINT,
-            headers={
-                "Authorization": f"Bearer {token}",
-                "anthropic-beta": ANTHROPIC_BETA,
-                "User-Agent": USER_AGENT,
-            },
+        last_exc: BaseException | None = None
+        for attempt in range(attempts):
+            try:
+                resp = http.get(
+                    USAGE_ENDPOINT,
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "anthropic-beta": ANTHROPIC_BETA,
+                        "User-Agent": USER_AGENT,
+                    },
+                )
+            except httpx.HTTPError as exc:
+                last_exc = exc
+                if attempt < attempts - 1:
+                    backoff = retry_backoffs_s[attempt]
+                    _LOG.warning(
+                        "usage API transport error (attempt %d/%d): %s; "
+                        "retrying in %.1fs",
+                        attempt + 1,
+                        attempts,
+                        exc,
+                        backoff,
+                    )
+                    sleep_fn(backoff)
+                    continue
+                raise UsageError(f"usage API request failed: {exc}") from exc
+            if resp.status_code == 401:
+                raise TokenExpiredError(
+                    "usage API returned HTTP 401; OAuth token is invalid or "
+                    "expired. Re-run `claude` on the host to refresh "
+                    "~/.claude/.credentials.json."
+                )
+            if 500 <= resp.status_code < 600 and attempt < attempts - 1:
+                backoff = retry_backoffs_s[attempt]
+                _LOG.warning(
+                    "usage API HTTP %d (attempt %d/%d); retrying in %.1fs",
+                    resp.status_code,
+                    attempt + 1,
+                    attempts,
+                    backoff,
+                )
+                sleep_fn(backoff)
+                continue
+            if resp.status_code != 200:
+                raise UsageError(
+                    f"usage API returned HTTP {resp.status_code}: "
+                    f"{resp.text[:200]}"
+                )
+            try:
+                payload = resp.json()
+            except json.JSONDecodeError as exc:
+                raise UsageError(
+                    f"usage API returned non-JSON body: {exc}"
+                ) from exc
+            if not isinstance(payload, dict):
+                raise UsageError("usage API payload must be a JSON object")
+            return parse_usage_payload(payload)
+        # ループは return か raise で抜けるはずだが、保険として last_exc を投げる。
+        raise UsageError(  # pragma: no cover - 防衛的フォールバック
+            f"usage API request failed: {last_exc}"
         )
-    except httpx.HTTPError as exc:
-        raise UsageError(f"usage API request failed: {exc}") from exc
     finally:
         if owns_client:
             http.close()
-    if resp.status_code == 401:
-        raise TokenExpiredError(
-            "usage API returned HTTP 401; OAuth token is invalid or expired. "
-            "Re-run `claude` on the host to refresh ~/.claude/.credentials.json."
-        )
-    if resp.status_code != 200:
-        raise UsageError(
-            f"usage API returned HTTP {resp.status_code}: {resp.text[:200]}"
-        )
-    try:
-        payload = resp.json()
-    except json.JSONDecodeError as exc:
-        raise UsageError(f"usage API returned non-JSON body: {exc}") from exc
-    if not isinstance(payload, dict):
-        raise UsageError("usage API payload must be a JSON object")
-    return parse_usage_payload(payload)

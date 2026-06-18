@@ -20,7 +20,6 @@ from knowl.tasks import TaskOutcome
 from knowl.tasks import run_task as run_task_impl
 from knowl.usage import (
     DEFAULT_CREDENTIALS_PATH,
-    TokenExpiredError,
     UsageError,
     UsageSnapshot,
     fetch_usage,
@@ -62,14 +61,14 @@ def check_config(config_path: Path) -> None:
 
 
 def _fetch_usage(token_path: Path | None) -> UsageSnapshot:
+    # ローカルの `expiresAt` 早切りは敢えてしない。
+    # host keepalive と cron tick の境界で credentials.json の差し替えが間に合うか
+    # 否かは race に依存しがちで、ローカルチェックは「expiresAt 過去だが API は
+    # まだ refresh 直後で 200 を返す」「逆に expiresAt 未来だが既に revoke」
+    # といった食い違いで誤判定する。判定は usage API の 401 に一本化する。
     creds = (
         load_oauth_credentials(token_path) if token_path else load_oauth_credentials()
     )
-    if creds.is_expired():
-        raise TokenExpiredError(
-            "OAuth token in credentials.json is past expiresAt; "
-            "re-run `claude` on the host to refresh."
-        )
     return fetch_usage(creds.access_token)
 
 

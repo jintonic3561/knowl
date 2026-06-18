@@ -128,6 +128,104 @@ def test_fetch_usage_401_raises_token_expired() -> None:
         fetch_usage("tok", client=client)
 
 
+def test_fetch_usage_retries_transient_transport_error() -> None:
+    """Server disconnected 系の一過性エラーはリトライで救う."""
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise httpx.RemoteProtocolError(
+                "Server disconnected without sending a response."
+            )
+        return httpx.Response(
+            200,
+            json={
+                "five_hour": {"utilization": 10.0},
+                "seven_day": {"utilization": 20.0},
+            },
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    sleeps: list[float] = []
+    snap = fetch_usage("tok", client=client, sleep=sleeps.append)
+    assert calls["n"] == 3
+    assert sleeps == [1.0, 4.0]
+    assert snap.session_remaining_pct == pytest.approx(90.0)
+
+
+def test_fetch_usage_retries_5xx_then_succeeds() -> None:
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return httpx.Response(503, text="busy")
+        return httpx.Response(
+            200,
+            json={
+                "five_hour": {"utilization": 0.0},
+                "seven_day": {"utilization": 0.0},
+            },
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    sleeps: list[float] = []
+    snap = fetch_usage("tok", client=client, sleep=sleeps.append)
+    assert calls["n"] == 2
+    assert sleeps == [1.0]
+    assert snap.session_remaining_pct == 100.0
+
+
+def test_fetch_usage_does_not_retry_401() -> None:
+    """401 はトークン側の問題なので即終了."""
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(401, text="invalid_grant")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    sleeps: list[float] = []
+    with pytest.raises(TokenExpiredError):
+        fetch_usage("tok", client=client, sleep=sleeps.append)
+    assert calls["n"] == 1
+    assert sleeps == []
+
+
+def test_fetch_usage_exhausts_retries_then_raises() -> None:
+    """全試行が失敗したら UsageError を投げる."""
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        raise httpx.RemoteProtocolError("boom")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    sleeps: list[float] = []
+    with pytest.raises(UsageError):
+        fetch_usage("tok", client=client, sleep=sleeps.append)
+    assert calls["n"] == 3  # 初回 + retry 2 回
+    assert sleeps == [1.0, 4.0]
+
+
+def test_fetch_usage_exhausts_retries_on_5xx() -> None:
+    """5xx が試行回数分続いたら最終 UsageError を投げる (401 と違って即終了しない)."""
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(502, text="bad gateway")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    sleeps: list[float] = []
+    with pytest.raises(UsageError) as exc:
+        fetch_usage("tok", client=client, sleep=sleeps.append)
+    assert "502" in str(exc.value)
+    assert calls["n"] == 3
+    assert sleeps == [1.0, 4.0]
+
+
 def test_load_oauth_credentials_extracts_expires_at(tmp_path: Path) -> None:
     creds = tmp_path / ".credentials.json"
     creds.write_text(
