@@ -12,6 +12,9 @@
     ]
   },
   "language": "japanese",
+  "env": {
+    "DISABLE_AUTOUPDATER": "1"
+  },
   "hooks": {
     "UserPromptSubmit": [
       {

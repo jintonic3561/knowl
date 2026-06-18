@@ -14,6 +14,12 @@
     // Node.js（Codex/OpenAI docs helper等で利用）
     "ghcr.io/devcontainers/features/node:1": {
       "version": "lts"
+    },
+    // Docker in Docker（compose で knowl コンテナを起動して疎通確認するため）
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {
+      "version": "latest",
+      "moby": true,
+      "dockerDashComposeVersion": "v2"
     }
   },
   "postCreateCommand": "bash .devcontainer/post-create.sh",
@@ -22,7 +28,7 @@
   },
   "customizations": {
     "vscode": {
-      "extensions": ["charliermarsh.ruff", "ms-python.python"],
+      "extensions": ["charliermarsh.ruff", "ms-python.python", "ms-vscode.live-server"],
       "settings": {
         "python.defaultInterpreterPath": ".venv/bin/python"
       }
