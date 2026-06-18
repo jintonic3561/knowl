@@ -31,12 +31,16 @@ SLACK_BOT_TOKEN=xoxb-...
 SLACK_CHANNEL=#knowl
 EOF
 
-# 4. 起動
-docker compose -f docker/docker-compose.yml --env-file .env up -d --build
+# 4. 起動 / 停止 / 単発実行 (Makefile 経由)
+make start     # 監視開始 (build + 常駐コンテナ起動)
+make stop      # 監視終了
+make run-once  # 1 サイクルだけ ephemeral コンテナで実行
 
 # ログ確認
-docker logs -f knowl
+make logs
 ```
+
+`make` か `make help` でターゲット一覧を確認できる。中身は `docker compose -f docker/docker-compose.yml ...` の薄いラッパなので、素の docker compose を直接使っても同等に動く。
 
 cron は `cron_interval_minutes` 設定 (デフォルト 60 分) に従って `knowl run-once` を起動する。ゲート判定で余裕がなければ no-op で次回まで待機する。
 
