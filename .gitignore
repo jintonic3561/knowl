@@ -3,6 +3,9 @@
 .env.*
 !.env.example
 
+# Knowl 設定 (ローカル実体。テンプレは knowl.example.yaml)
+/knowl.yaml
+
 # Python
 __pycache__/
 *.py[cod]

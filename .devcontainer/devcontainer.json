@@ -22,6 +22,8 @@
       "dockerDashComposeVersion": "v2"
     }
   },
+  // Knowl から `docker exec` で叩けるよう固定名で起動する (knowl オーケストレータ自身は container_name: knowl)
+  "runArgs": ["--name", "knowl-dev"],
   "postCreateCommand": "bash .devcontainer/post-create.sh",
   "remoteEnv": {
     "UV_LINK_MODE": "copy"

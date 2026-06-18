@@ -19,8 +19,8 @@
 
 ```bash
 # 1. 設定ファイルを用意
-cp docker/config.example.yaml docker/config.yaml
-$EDITOR docker/config.yaml
+cp knowl.example.yaml knowl.yaml
+$EDITOR knowl.yaml
 
 # 2. Claude Code に予めログインしておく (ホスト側で)
 #    -> ~/.claude/.credentials.json が生成される
@@ -57,7 +57,7 @@ uv sync
 uv run ruff check
 uv run mypy
 uv run pytest
-uv run knowl check-config --config docker/config.example.yaml
+uv run knowl check-config --config knowl.example.yaml
 ```
 
 ## 設定スキーマ (抜粋)

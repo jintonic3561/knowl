@@ -1,4 +1,4 @@
-# Knowl 設定例 (cp して docker/config.yaml にし、compose で /etc/knowl/config.yaml にマウント)
+# Knowl 設定例 (cp して knowl.yaml にし、compose で /etc/knowl/config.yaml にマウント)
 model: claude-opus-4-7
 cron_interval_minutes: 60
 
