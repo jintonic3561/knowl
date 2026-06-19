@@ -13,9 +13,11 @@
       "version": "lts"
     },
     // Docker in Docker（compose で knowl コンテナを起動して疎通確認するため）
+    // moby=false: ベース (python:3.13-slim = debian trixie) では moby-cli の apt パッケージが提供されないため
+    // 公式 Docker CE 経路でインストールする。
     "ghcr.io/devcontainers/features/docker-in-docker:2": {
       "version": "latest",
-      "moby": true,
+      "moby": false,
       "dockerDashComposeVersion": "v2"
     }
   },
