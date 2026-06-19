@@ -2,6 +2,49 @@
 
 複数の自リポジトリの GitHub issue を、Claude Code の使用量に余裕がある時間帯に自動消化する小さなオーケストレータ。Pro / Max subscription の OAuth トークンを使い、5h ローリング枠と週次枠の残量を見てゲート判定し、登録リポジトリの open issue から最優先 1 件を Claude に判定させ、対応するローカルの作業コンテナで `claude -p` を起動して作業を行う。
 
+## 構成
+
+ホスト・Knowl コンテナ・対象リポジトリのコンテナがどう繋がっているかの俯瞰図。
+
+```mermaid
+flowchart LR
+    subgraph Host["ホスト"]
+        Cred["~/.claude/<br/>.credentials.json"]
+        GhCfg["~/.config/gh"]
+        Sock["/var/run/<br/>docker.sock"]
+        Keepalive["host cron<br/>(make keepalive-*)"]
+    end
+
+    subgraph KnowlCtr["Knowl コンテナ"]
+        KCron["内部 cron<br/>(cron_interval_minutes)"]
+        KRun["knowl run-once<br/>(gate → prioritize → dispatch)"]
+        KCron --> KRun
+    end
+
+    subgraph TargetCtr["対象リポジトリのコンテナ<br/>(リポジトリごとに 1 つ)"]
+        TClaude["claude -p<br/>(implementation / investigation)"]
+    end
+
+    subgraph External["外部サービス"]
+        Usage[("Claude Usage API")]
+        GitHub[("GitHub API")]
+        Slack[("Slack")]
+    end
+
+    Keepalive -->|残寿命を見て<br/>access token refresh| Cred
+    Cred -.ro mount.- KnowlCtr
+    GhCfg -.ro mount.- KnowlCtr
+    Sock -.mount.- KnowlCtr
+
+    KRun -->|docker exec<br/>via docker.sock| TClaude
+    KRun <-->|usage / issues / Slack 通知| External
+    TClaude <-->|PR / コメント| GitHub
+```
+
+- Knowl コンテナはホストの `~/.claude` を読むだけで credentials の中継はしない。対象コンテナ側に Claude Code と `gh` を別途認証済で用意する。
+- `docker.sock` をマウントしているので、Knowl コンテナから `docker exec <対象>` で対象コンテナ内の `claude -p` を起動する (docker-out-of-docker)。
+- host cron 側の keepalive はトークン失効による夜間 no-op を避けるための補助路。詳細は[OAuth トークンの自動 refresh](#oauth-トークンの自動-refresh-host-側-keepalive)を参照。
+
 ## ワークフロー
 
 | No | 内容 | 実装 |
