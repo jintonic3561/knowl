@@ -12,13 +12,16 @@ KEEPALIVE_MARKER := \# knowl-keepalive
 KEEPALIVE_CRON   ?= */30 * * * *
 KEEPALIVE_LOG    := $(abspath .logs/keepalive.log)
 
-.PHONY: help start stop run-once logs keepalive-start keepalive-stop keepalive-status keepalive-now keepalive-logs
+.PHONY: help start stop deploy run-once logs keepalive-start keepalive-stop keepalive-status keepalive-now keepalive-logs
 
 help: ## 利用可能なターゲット一覧
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-start: ## 監視開始 (cron 常駐コンテナを build + 起動)
+start: ## 監視開始 (cron 常駐コンテナを build + 起動。起動直後に 1 サイクル即時実行)
 	$(COMPOSE) up -d --build
+
+deploy: ## 稼働中コンテナの差し替え (rebuild + 再起動。即時 1 サイクルは走らせず次 tick から開始)
+	KNOWL_SKIP_INITIAL_RUN=1 $(COMPOSE) up -d --build
 
 stop: ## 監視終了 (コンテナ停止・削除)
 	$(COMPOSE) down

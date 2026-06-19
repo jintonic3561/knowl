@@ -35,6 +35,7 @@ EOF
 
 # 4. 起動 / 停止 / 単発実行 (Makefile 経由)
 make start     # 監視開始 (build + 常駐コンテナ起動)
+make deploy    # 稼働中コンテナの差し替え (rebuild + 再起動。即時 1 サイクルはスキップ)
 make stop      # 監視終了
 make run-once  # 1 サイクルだけ ephemeral コンテナで実行
 
@@ -48,7 +49,7 @@ cron は `cron_interval_minutes` 設定 (デフォルト 60 分) に従って `k
 
 タスクタイプ (実装 / 調査) は issue に専用ラベルを付けると Claude を介さず決定する。`knowl-implementation` / `knowl-investigation` のどちらか一方を付けるとそのタイプで実行される。両方付いている / どちらも無い場合は従来通り Claude 判定にフォールバックする。各リポジトリで `gh label create knowl-implementation` / `gh label create knowl-investigation` で作成しておく。
 
-make start 時は起動直後に 1 サイクル動く。
+make start 時は起動直後に 1 サイクル動く。Knowl 自身のリポジトリで PR がオートマージされた場合、稼働中コンテナの image を差し替える必要があるが、その際は `make start` ではなく `make deploy` を使う。`make deploy` は `KNOWL_SKIP_INITIAL_RUN=1` 付きで `up -d --build` するだけで、起動直後の即時 1 サイクルをスキップする。直前サイクルの完了とほぼ同時にもう 1 サイクル走らせると、二重実行 (`run-cycle.sh` 内 flock で skip はされるが、Slack 通知やログが乱れる) のリスクがあるため。
 
 ### OAuth トークンの自動 refresh (host 側 keepalive)
 

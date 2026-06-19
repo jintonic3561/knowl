@@ -33,7 +33,9 @@ def test_build_cycle_summary_minimal() -> None:
         repo="acme/widgets",
         issue_number=12,
         issue_title="Fix login",
+        issue_url="https://github.com/acme/widgets/issues/12",
         outcome="PR #34 opened for review",
+        outcome_url="https://github.com/acme/widgets/pull/34",
         followups=["create issue: add tests"],
     )
     assert "acme/widgets" in text
@@ -41,6 +43,9 @@ def test_build_cycle_summary_minimal() -> None:
     assert "Fix login" in text
     assert "PR #34" in text
     assert "create issue: add tests" in text
+    # issue URL と outcome URL が文中に含まれる
+    assert "https://github.com/acme/widgets/issues/12" in text
+    assert "https://github.com/acme/widgets/pull/34" in text
 
 
 def test_build_cycle_summary_without_followups() -> None:
@@ -48,10 +53,14 @@ def test_build_cycle_summary_without_followups() -> None:
         repo="a/b",
         issue_number=1,
         issue_title="t",
+        issue_url="https://github.com/a/b/issues/1",
         outcome="merged",
+        outcome_url=None,
         followups=[],
     )
     assert "なし" in text
+    # outcome_url 無しでも issue URL は出る
+    assert "https://github.com/a/b/issues/1" in text
 
 
 def test_build_limit_alert_mentions_limit() -> None:
