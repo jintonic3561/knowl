@@ -32,12 +32,17 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Claude Code CLI (script installer)。dev/本番でバージョンを揃えるためピン留めする。
+# dev ステージで vscode ユーザーに再インストールするため ENV で派生に引き継ぐ。
 ARG CLAUDE_CODE_VERSION=2.1.153
+ENV CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION}
 RUN curl -fsSL https://claude.ai/install.sh | bash -s "${CLAUDE_CODE_VERSION}"
 
 # uv (Astral)
+# /root は 0700 で他ユーザーから辿れないため、symlink ではなくバイナリ実体を
+# /usr/local/bin に移す。dev ステージの vscode ユーザーも同じ uv を使える。
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
-    && ln -s /root/.local/bin/uv /usr/local/bin/uv
+    && mv /root/.local/bin/uv /usr/local/bin/uv \
+    && (mv /root/.local/bin/uvx /usr/local/bin/uvx 2>/dev/null || true)
 
 ENV PATH=/root/.local/bin:$PATH
 
@@ -67,3 +72,25 @@ COPY docker/run-cycle.sh /usr/local/bin/knowl-run-cycle
 RUN chmod +x /usr/local/bin/knowl-entrypoint /usr/local/bin/knowl-run-cycle
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/knowl-entrypoint"]
+
+
+# devcontainer 専用ステージ。
+# claude --dangerously-skip-permissions は root で起動できないため、
+# vscode ユーザー (uid 1000, sudo NOPASSWD) を作って claude を入れ直す。
+# 本番 runtime は base のまま (root 動作) でドリフトしないよう、devcontainer 側だけここで派生する。
+FROM base AS dev
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends sudo \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --gid 1000 vscode \
+    && useradd --uid 1000 --gid 1000 -m -s /bin/bash vscode \
+    && echo "vscode ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/vscode \
+    && chmod 0440 /etc/sudoers.d/vscode
+
+USER vscode
+
+# CLAUDE_CODE_VERSION は base から ENV 経由で継承される (base/runtime/dev で同一バージョン)。
+RUN curl -fsSL https://claude.ai/install.sh | bash -s "${CLAUDE_CODE_VERSION}"
+
+ENV PATH=/home/vscode/.local/bin:${PATH}

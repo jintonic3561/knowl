@@ -5,8 +5,11 @@
   "build": {
     "dockerfile": "../docker/Dockerfile",
     "context": "..",
-    "target": "base"
+    "target": "dev"
   },
+  // claude --dangerously-skip-permissions が root では起動できないため、
+  // docker/Dockerfile の dev ステージで作成した vscode ユーザーで実行する。
+  "remoteUser": "vscode",
   "features": {
     // Node.js（Codex/OpenAI docs helper等で利用）
     "ghcr.io/devcontainers/features/node:1": {
