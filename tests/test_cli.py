@@ -65,3 +65,16 @@ def test_check_config_invalid(tmp_path: Path) -> None:
     runner = CliRunner()
     result = runner.invoke(cli.main, ["check-config", "--config", str(bad)])
     assert result.exit_code != 0
+
+
+def test_bot_requires_slack_tokens(
+    tmp_path: Path, monkeypatch: object
+) -> None:
+    cfg_path = write_config(tmp_path)
+    runner = CliRunner()
+    # 両 token を空にすると early exit (Socket Mode 接続前) する
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "")  # type: ignore[attr-defined]
+    monkeypatch.setenv("SLACK_APP_TOKEN", "")  # type: ignore[attr-defined]
+    result = runner.invoke(cli.main, ["bot", "--config", str(cfg_path)])
+    assert result.exit_code == 2
+    assert "SLACK" in result.output

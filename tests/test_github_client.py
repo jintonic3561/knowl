@@ -9,7 +9,13 @@ from collections.abc import Sequence
 import pytest
 
 from knowl.config import RepoConfig
-from knowl.github_client import GitHubError, IssueRef, list_open_issues
+from knowl.github_client import (
+    GitHubError,
+    IssueRef,
+    create_issue,
+    list_open_issues,
+    resolve_gh_login,
+)
 
 
 def _repo(name: str = "acme/widgets") -> RepoConfig:
@@ -143,3 +149,114 @@ def test_list_open_issues_invalid_json(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(subprocess, "run", bad_json)
     with pytest.raises(GitHubError):
         list_open_issues([_repo()])
+
+
+def test_create_issue_parses_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[Sequence[str]] = []
+
+    def run(
+        cmd: Sequence[str],
+        *,
+        capture_output: bool,
+        text: bool,
+        check: bool,
+        timeout: float | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(list(cmd))
+        return subprocess.CompletedProcess(
+            args=list(cmd),
+            returncode=0,
+            stdout="https://github.com/acme/widgets/issues/42\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(subprocess, "run", run)
+    issue = create_issue(
+        "acme/widgets", title="Test", body="body content"
+    )
+    assert isinstance(issue, IssueRef)
+    assert issue.repo == "acme/widgets"
+    assert issue.number == 42
+    assert issue.title == "Test"
+    assert issue.body == "body content"
+    assert issue.url == "https://github.com/acme/widgets/issues/42"
+    # gh issue create に正しい引数
+    assert calls[0][:3] == ["gh", "issue", "create"]
+    assert "--repo" in calls[0]
+    assert "acme/widgets" in calls[0]
+    assert "--title" in calls[0]
+    assert "Test" in calls[0]
+    assert "--body" in calls[0]
+    assert "body content" in calls[0]
+
+
+def test_create_issue_handles_unexpected_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    def run(
+        cmd: Sequence[str],
+        *,
+        capture_output: bool,
+        text: bool,
+        check: bool,
+        timeout: float | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args=list(cmd), returncode=0, stdout="garbage\n", stderr=""
+        )
+
+    monkeypatch.setattr(subprocess, "run", run)
+    with pytest.raises(GitHubError):
+        create_issue("acme/widgets", title="t", body="b")
+
+
+def test_create_issue_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    def boom(
+        cmd: Sequence[str],
+        *,
+        capture_output: bool,
+        text: bool,
+        check: bool,
+        timeout: float | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        raise subprocess.CalledProcessError(
+            returncode=1, cmd=list(cmd), output="", stderr="rate limited"
+        )
+
+    monkeypatch.setattr(subprocess, "run", boom)
+    with pytest.raises(GitHubError) as exc:
+        create_issue("acme/widgets", title="t", body="b")
+    assert "rate limited" in str(exc.value)
+
+
+def test_resolve_gh_login_returns_stripped(monkeypatch: pytest.MonkeyPatch) -> None:
+    def run(
+        cmd: Sequence[str],
+        *,
+        capture_output: bool,
+        text: bool,
+        check: bool,
+        timeout: float | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args=list(cmd), returncode=0, stdout="alice\n", stderr=""
+        )
+
+    monkeypatch.setattr(subprocess, "run", run)
+    assert resolve_gh_login() == "alice"
+
+
+def test_resolve_gh_login_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    def boom(
+        cmd: Sequence[str],
+        *,
+        capture_output: bool,
+        text: bool,
+        check: bool,
+        timeout: float | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        raise subprocess.CalledProcessError(
+            returncode=1, cmd=list(cmd), output="", stderr="auth required"
+        )
+
+    monkeypatch.setattr(subprocess, "run", boom)
+    with pytest.raises(GitHubError):
+        resolve_gh_login()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import sys
@@ -10,13 +11,21 @@ from pathlib import Path
 
 import click
 
+from knowl.adhoc import AdhocResult, run_adhoc
 from knowl.config import AppConfig, ConfigError, RepoConfig, load_config
 from knowl.container import ensure_running
 from knowl.cycle import CycleResult, run_cycle
-from knowl.github_client import IssueRef, list_open_issues
+from knowl.github_client import (
+    GitHubError,
+    IssueRef,
+    create_issue,
+    list_open_issues,
+    resolve_gh_login,
+)
 from knowl.keepalive import DEFAULT_THRESHOLD_MS, DEFAULT_TIMEOUT_S, keepalive_once
 from knowl.prioritize import NoActionableIssue, PriorityDecision, pick_priority
 from knowl.slack import SlackNotifier
+from knowl.slack_bot import run_bot_forever
 from knowl.tasks import TaskOutcome
 from knowl.tasks import run_task as run_task_impl
 from knowl.usage import (
@@ -140,6 +149,74 @@ def run_once(config_path: Path, credentials_path: Path | None) -> None:
         click.echo(f"no-op: {result.reason}")
         return
     click.echo(f"done: {result.reason}")
+
+
+@main.command("bot")
+@click.option(
+    "--config",
+    "config_path",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option(
+    "--credentials",
+    "credentials_path",
+    default=None,
+    type=click.Path(dir_okay=False, path_type=Path),
+    help="~/.claude/.credentials.json の代替パス.",
+)
+def bot(config_path: Path, credentials_path: Path | None) -> None:
+    """Slack slash command `/knowl` を Socket Mode で待受ける常駐モード."""
+    try:
+        cfg = load_config(config_path)
+    except ConfigError as exc:
+        click.echo(f"config invalid: {exc}", err=True)
+        sys.exit(2)
+
+    bot_token = os.environ.get("SLACK_BOT_TOKEN")
+    app_token = os.environ.get("SLACK_APP_TOKEN")
+    if not bot_token or not app_token:
+        click.echo(
+            "SLACK_BOT_TOKEN and SLACK_APP_TOKEN must be set for the bot to start.",
+            err=True,
+        )
+        sys.exit(2)
+
+    try:
+        login = resolve_gh_login()
+    except GitHubError as exc:
+        click.echo(f"gh login resolution failed: {exc}", err=True)
+        sys.exit(2)
+
+    notifier = _make_notifier(cfg)
+
+    def notify(text: str) -> None:
+        try:
+            notifier.post(text)
+        except Exception as exc:
+            _LOG.warning("slack notification failed: %s", exc)
+        click.echo(text)
+
+    async def adhoc_runner(*, repo: str, task: str, user: str) -> AdhocResult:
+        return await asyncio.to_thread(
+            run_adhoc,
+            cfg,
+            repo_name=repo,
+            task_description=task,
+            user=user,
+            fetch_usage=lambda: _fetch_usage(credentials_path),
+            create_issue=create_issue,
+            ensure_container=ensure_running,
+            run_task=_run_task,
+            notify=notify,
+        )
+
+    run_bot_forever(
+        bot_token=bot_token,
+        app_token=app_token,
+        login=login,
+        adhoc_runner=adhoc_runner,
+    )
 
 
 @main.command("keepalive")

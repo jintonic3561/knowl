@@ -29,7 +29,7 @@ done
 SECRETS_ENV=/etc/knowl/secrets.env
 mkdir -p /etc/knowl
 install -m 0600 /dev/null "${SECRETS_ENV}"
-for v in SLACK_BOT_TOKEN GH_TOKEN; do
+for v in SLACK_BOT_TOKEN SLACK_APP_TOKEN GH_TOKEN; do
   val="${!v-}"
   if [ -n "${val}" ]; then
     printf '%s=%q\n' "${v}" "${val}" >> "${SECRETS_ENV}"
@@ -72,5 +72,37 @@ case "${KNOWL_SKIP_INITIAL_RUN:-0}" in
     ;;
 esac
 
-# cron を foreground で。tini が PID 1 でこのプロセスを監視する。
-exec cron -f
+# cron と Slack bot supervisor の両方を background で立てて、最後の wait を foreground にする。
+# こうすることで tini が SIGTERM を投げると trap がそれぞれに伝播し、 graceful shutdown が成立する。
+# `exec cron -f` の単純構成では bot 側 subshell に signal が届かなかったので、 wait 構成に揃える。
+cron -f > /proc/1/fd/1 2> /proc/1/fd/2 &
+CRON_PID=$!
+echo "[knowl] cron started (pid=${CRON_PID})"
+
+BOT_SUPERVISOR_PID=""
+if [ -n "${SLACK_APP_TOKEN-}" ] && [ -n "${SLACK_BOT_TOKEN-}" ]; then
+  echo "[knowl] starting Slack bot supervisor"
+  (
+    trap 'kill -TERM ${BOT_PID-} 2>/dev/null; exit 0' TERM INT
+    while true; do
+      uv run --project /opt/knowl knowl bot --config "${CONFIG}" \
+        --credentials "${KNOWL_CREDENTIALS:-/root/.claude/.credentials.json}" \
+        > /proc/1/fd/1 2> /proc/1/fd/2 &
+      BOT_PID=$!
+      wait "${BOT_PID}" || true
+      echo "[knowl] Slack bot exited; restarting in 5s" > /proc/1/fd/1
+      sleep 5
+    done
+  ) &
+  BOT_SUPERVISOR_PID=$!
+else
+  echo "[knowl] SLACK_APP_TOKEN/SLACK_BOT_TOKEN not set; skipping Slack bot"
+fi
+
+# tini → entrypoint への SIGTERM/SIGINT を子に伝播してから、 wait で先に exit したものに従う。
+# cron が落ちたら container 全体を exit させ restart=unless-stopped に任せる方針。
+trap 'kill -TERM ${CRON_PID} ${BOT_SUPERVISOR_PID} 2>/dev/null' TERM INT
+wait -n "${CRON_PID}" ${BOT_SUPERVISOR_PID:+"${BOT_SUPERVISOR_PID}"}
+EXIT_CODE=$?
+kill -TERM ${CRON_PID} ${BOT_SUPERVISOR_PID} 2>/dev/null || true
+exit "${EXIT_CODE}"
