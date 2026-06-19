@@ -1,24 +1,26 @@
 {
-  // ローカルWSLにdockerが無いためビルド未検証。Docker Desktop/リモートで利用想定。
+  // 本番動作コンテナと同じレシピを使うため、docker/Dockerfile の base ステージを直接ビルドする。
+  // 共通ツール (uv, gh, claude, docker-cli) はそちらで導入済 -> features 側では重複させない。
   "name": "knowl",
-  "image": "mcr.microsoft.com/devcontainers/python:3.13-bookworm",
+  "build": {
+    "dockerfile": "../docker/Dockerfile",
+    "context": "..",
+    "target": "dev"
+  },
+  // claude --dangerously-skip-permissions が root では起動できないため、
+  // docker/Dockerfile の dev ステージで作成した vscode ユーザーで実行する。
+  "remoteUser": "vscode",
   "features": {
-    // uv（パッケージ管理）。問題時は公式インストーラ(curl -LsSf https://astral.sh/uv/install.sh|sh)に切替可
-    "ghcr.io/va-h/devcontainers-features/uv:1": {
-      "version": "latest"
-    },
-    // GitHub CLI（gh）。digestはlockでpin（uvと同様）
-    "ghcr.io/devcontainers/features/github-cli:1": {
-      "version": "latest"
-    },
     // Node.js（Codex/OpenAI docs helper等で利用）
     "ghcr.io/devcontainers/features/node:1": {
       "version": "lts"
     },
     // Docker in Docker（compose で knowl コンテナを起動して疎通確認するため）
+    // moby=false: ベース (python:3.13-slim = debian trixie) では moby-cli の apt パッケージが提供されないため
+    // 公式 Docker CE 経路でインストールする。
     "ghcr.io/devcontainers/features/docker-in-docker:2": {
       "version": "latest",
-      "moby": true,
+      "moby": false,
       "dockerDashComposeVersion": "v2"
     }
   },
