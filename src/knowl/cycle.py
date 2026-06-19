@@ -260,7 +260,9 @@ def run_cycle(
         repo=decision.repo,
         issue_number=decision.number,
         issue_title=picked.title,
+        issue_url=picked.url,
         outcome=f"{outcome.action}: {outcome.summary}".strip(": ").strip(),
+        outcome_url=outcome.url,
         followups=outcome.followups,
     )
     notify(summary)
