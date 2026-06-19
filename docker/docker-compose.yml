@@ -11,6 +11,8 @@ services:
       GH_TOKEN: "${GH_TOKEN:-}"
       KNOWL_CONFIG: /etc/knowl/config.yaml
       KNOWL_CREDENTIALS: /root/.claude/.credentials.json
+      # truthy なら entrypoint の初回即時実行を skip。`make deploy` から渡す想定。
+      KNOWL_SKIP_INITIAL_RUN: "${KNOWL_SKIP_INITIAL_RUN:-}"
     volumes:
       # Knowl 設定 (必須)
       - ../knowl.yaml:/etc/knowl/config.yaml:ro
