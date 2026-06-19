@@ -53,7 +53,13 @@ FROM base AS runtime
 # UV_PROJECT_ENVIRONMENT は base に置かない: devcontainer 側は workspace
 # (/workspaces/knowl) で uv sync して python.defaultInterpreterPath が指す
 # .venv/bin/python を使うため、固定パスを base に焼くと dev の挙動が変わる。
-ENV UV_PROJECT_ENVIRONMENT=/opt/knowl/.venv
+#
+# PYTHONDONTWRITEBYTECODE は runtime 専用。docker-compose.yml で host 側 src/ を
+# ro mount するため、Python が __pycache__ を書こうとして PermissionError で諦め、
+# 結果毎プロセスで bytecode 再コンパイル(=不要な CPU)が走る。書かない方が一貫する。
+# devcontainer (dev ステージ) は workspace 上で書ける方が import 高速になるので除外。
+ENV UV_PROJECT_ENVIRONMENT=/opt/knowl/.venv \
+    PYTHONDONTWRITEBYTECODE=1
 
 WORKDIR /opt/knowl
 COPY pyproject.toml uv.lock* README.md /opt/knowl/

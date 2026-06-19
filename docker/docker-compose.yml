@@ -24,3 +24,9 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       # gh CLI 認証情報 (任意)
       - ${HOME}/.config/gh:/root/.config/gh:ro
+      # knowl 自身の PR が auto-merge された後、稼働中コンテナへ変更を伝播させる bind mount。
+      # Dockerfile 側で uv が editable install (.pth → /opt/knowl/src) しているので、
+      # host 側で main を pull した瞬間から次サイクル以降は新コードで走る。
+      # 依存追加・entry-point 追加など .venv 再生成が必要な変更は引き続き `make deploy` で rebuild。
+      - ../src:/opt/knowl/src:ro
+      - ../templates:/opt/knowl/templates:ro
