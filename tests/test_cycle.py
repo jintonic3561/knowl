@@ -291,6 +291,9 @@ def test_run_cycle_happy_path(tmp_path: Path) -> None:
     assert "開始" in posted[0]
     assert "pr-opened" in posted[1]
     assert "next" in posted[1]
+    # サマリ通知に issue URL と PR URL が含まれる
+    assert fixture_issue.url in posted[1]
+    assert "https://pr/1" in posted[1]
 
 
 def test_run_cycle_overrides_kind_from_label(tmp_path: Path) -> None:
