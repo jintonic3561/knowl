@@ -8,6 +8,7 @@ services:
     restart: unless-stopped
     environment:
       SLACK_BOT_TOKEN: "${SLACK_BOT_TOKEN:-}"
+      SLACK_APP_TOKEN: "${SLACK_APP_TOKEN:-}"
       SLACK_CHANNEL: "${SLACK_CHANNEL:-}"
       GH_TOKEN: "${GH_TOKEN:-}"
       KNOWL_CONFIG: /etc/knowl/config.yaml

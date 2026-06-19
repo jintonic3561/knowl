@@ -7,6 +7,7 @@ gh は devcontainer feature でインストール済の前提。
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -15,6 +16,7 @@ from knowl.config import RepoConfig
 
 _JSON_FIELDS = "number,title,body,labels,url,updatedAt,closedByPullRequestsReferences"
 _DEFAULT_TIMEOUT = 30.0
+_ISSUE_URL_RE = re.compile(r"https://github\.com/[^/]+/[^/]+/issues/(\d+)")
 
 
 class GitHubError(RuntimeError):
@@ -115,3 +117,81 @@ def list_open_issues(
                 continue
             issues.append(_parse_issue(repo.name, raw))
     return issues
+
+
+def create_issue(
+    repo_name: str,
+    *,
+    title: str,
+    body: str,
+    timeout: float = _DEFAULT_TIMEOUT,
+) -> IssueRef:
+    """``gh issue create`` で issue を起票し、 ``IssueRef`` を返す.
+
+    Slack slash command など ad-hoc 起動から呼ぶ用途。 ``--json`` は
+    ``gh issue create`` で安定しないため、標準出力に出る issue URL から番号を抜く。
+    """
+    cmd = [
+        "gh",
+        "issue",
+        "create",
+        "--repo",
+        repo_name,
+        "--title",
+        title,
+        "--body",
+        body,
+    ]
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=timeout,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise GitHubError(
+            f"gh issue create failed for {repo_name}: {exc.stderr or exc.stdout}"
+        ) from exc
+    except subprocess.TimeoutExpired as exc:
+        raise GitHubError(f"gh issue create timed out for {repo_name}") from exc
+    url_match = _ISSUE_URL_RE.search(result.stdout)
+    if url_match is None:
+        raise GitHubError(
+            f"gh issue create returned unexpected output for {repo_name}: "
+            f"{result.stdout.strip()[:200]}"
+        )
+    number = int(url_match.group(1))
+    return IssueRef(
+        repo=repo_name,
+        number=number,
+        title=title,
+        body=body,
+        labels=(),
+        url=url_match.group(0),
+        updated_at="",
+    )
+
+
+def resolve_gh_login(*, timeout: float = _DEFAULT_TIMEOUT) -> str:
+    """``gh api user --jq .login`` で現在のログインユーザ名を取得する."""
+    cmd = ["gh", "api", "user", "--jq", ".login"]
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=timeout,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise GitHubError(
+            f"gh api user failed: {exc.stderr or exc.stdout}"
+        ) from exc
+    except subprocess.TimeoutExpired as exc:
+        raise GitHubError("gh api user timed out") from exc
+    login = result.stdout.strip()
+    if not login:
+        raise GitHubError("gh api user returned empty login")
+    return login
