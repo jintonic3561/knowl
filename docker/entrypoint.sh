@@ -60,8 +60,17 @@ chmod 0644 /etc/cron.d/knowl
 echo "[knowl] starting cron with schedule: ${SCHED}"
 echo "[knowl] config: ${CONFIG}"
 
-# 初回も即時実行
-/usr/local/bin/knowl-run-cycle || true
+# 初回も即時実行。ただし KNOWL_SKIP_INITIAL_RUN が truthy なら skip する。
+# `make deploy` のように、稼働中のサイクル直後にリビルド + 再起動する用途では、
+# 直前サイクルの完了とほぼ同時にもう 1 サイクル走るのを避けたい。
+case "${KNOWL_SKIP_INITIAL_RUN:-0}" in
+  1|true|TRUE|yes|YES)
+    echo "[knowl] KNOWL_SKIP_INITIAL_RUN set; skipping initial run"
+    ;;
+  *)
+    /usr/local/bin/knowl-run-cycle || true
+    ;;
+esac
 
 # cron を foreground で。tini が PID 1 でこのプロセスを監視する。
 exec cron -f
