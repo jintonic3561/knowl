@@ -14,27 +14,7 @@ from knowl.container import (
     ensure_running,
     exec_in_container,
 )
-
-
-class RunRecorder:
-    def __init__(self, scripted: list[tuple[int, str, str]]) -> None:
-        self.scripted = scripted
-        self.calls: list[Sequence[str]] = []
-
-    def __call__(
-        self,
-        cmd: Sequence[str],
-        *,
-        capture_output: bool,
-        text: bool,
-        check: bool,
-        timeout: float | None = None,
-    ) -> subprocess.CompletedProcess[str]:
-        self.calls.append(list(cmd))
-        rc, out, err = self.scripted.pop(0)
-        if check and rc != 0:
-            raise subprocess.CalledProcessError(rc, list(cmd), out, err)
-        return subprocess.CompletedProcess(args=list(cmd), returncode=rc, stdout=out, stderr=err)
+from tests.conftest import FakeProc
 
 
 def docker_cfg(
@@ -58,7 +38,7 @@ def devcontainer_cfg(
 
 
 def test_ensure_running_skips_start_when_already_running(monkeypatch: pytest.MonkeyPatch) -> None:
-    rec = RunRecorder([(0, "true\n", "")])  # docker inspect → running=true
+    rec = FakeProc(scripted=[(0, "true\n", "")])  # docker inspect → running=true
     monkeypatch.setattr(subprocess, "run", rec)
 
     ensure_running(docker_cfg())
@@ -67,7 +47,7 @@ def test_ensure_running_skips_start_when_already_running(monkeypatch: pytest.Mon
 
 
 def test_ensure_running_starts_when_stopped(monkeypatch: pytest.MonkeyPatch) -> None:
-    rec = RunRecorder([(0, "false\n", ""), (0, "widgets-dev\n", "")])
+    rec = FakeProc(scripted=[(0, "false\n", ""), (0, "widgets-dev\n", "")])
     monkeypatch.setattr(subprocess, "run", rec)
 
     ensure_running(docker_cfg())
@@ -77,25 +57,14 @@ def test_ensure_running_starts_when_stopped(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def test_ensure_running_raises_when_container_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    def boom(
-        cmd: Sequence[str],
-        *,
-        capture_output: bool,
-        text: bool,
-        check: bool,
-        timeout: float | None = None,
-    ) -> subprocess.CompletedProcess[str]:
-        raise subprocess.CalledProcessError(
-            returncode=1, cmd=list(cmd), output="", stderr="No such container"
-        )
-
-    monkeypatch.setattr(subprocess, "run", boom)
+    rec = FakeProc(scripted=[(1, "", "No such container")])
+    monkeypatch.setattr(subprocess, "run", rec)
     with pytest.raises(ContainerError):
         ensure_running(docker_cfg())
 
 
 def test_exec_in_container_uses_docker_exec(monkeypatch: pytest.MonkeyPatch) -> None:
-    rec = RunRecorder([(0, "true\n", ""), (0, "hi\n", "")])
+    rec = FakeProc(scripted=[(0, "true\n", ""), (0, "hi\n", "")])
     monkeypatch.setattr(subprocess, "run", rec)
 
     result = exec_in_container(docker_cfg(), ["echo", "hi"], workdir="/work")
@@ -111,14 +80,14 @@ def test_exec_in_container_uses_docker_exec(monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_exec_in_container_devcontainer_kind(monkeypatch: pytest.MonkeyPatch) -> None:
     """devcontainer kind も docker exec を発行する(単一バックエンド)."""
-    rec = RunRecorder([(0, "true\n", ""), (0, "ok\n", "")])
+    rec = FakeProc(scripted=[(0, "true\n", ""), (0, "ok\n", "")])
     monkeypatch.setattr(subprocess, "run", rec)
     exec_in_container(devcontainer_cfg(), ["ls"], workdir="/workspaces/widgets")
     assert rec.calls[1][0:2] == ["docker", "exec"]
 
 
 def test_exec_in_container_propagates_nonzero(monkeypatch: pytest.MonkeyPatch) -> None:
-    rec = RunRecorder([(0, "true\n", ""), (3, "out", "err")])
+    rec = FakeProc(scripted=[(0, "true\n", ""), (3, "out", "err")])
     monkeypatch.setattr(subprocess, "run", rec)
 
     result = exec_in_container(docker_cfg(), ["false"], workdir="/work")
@@ -129,7 +98,7 @@ def test_exec_in_container_propagates_nonzero(monkeypatch: pytest.MonkeyPatch) -
 
 
 def test_exec_in_container_supports_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    rec = RunRecorder([(0, "true\n", ""), (0, "", "")])
+    rec = FakeProc(scripted=[(0, "true\n", ""), (0, "", "")])
     monkeypatch.setattr(subprocess, "run", rec)
 
     exec_in_container(
@@ -147,7 +116,7 @@ def test_exec_in_container_supports_env(monkeypatch: pytest.MonkeyPatch) -> None
 def test_exec_in_container_passes_user_flag_and_wraps_login_shell(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    rec = RunRecorder([(0, "true\n", ""), (0, "", "")])
+    rec = FakeProc(scripted=[(0, "true\n", ""), (0, "", "")])
     monkeypatch.setattr(subprocess, "run", rec)
 
     exec_in_container(devcontainer_cfg(user="vscode"), ["claude", "-p"], workdir="/work")
@@ -163,7 +132,7 @@ def test_exec_in_container_passes_user_flag_and_wraps_login_shell(
 def test_exec_in_container_login_shell_quotes_unsafe_argv(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    rec = RunRecorder([(0, "true\n", ""), (0, "", "")])
+    rec = FakeProc(scripted=[(0, "true\n", ""), (0, "", "")])
     monkeypatch.setattr(subprocess, "run", rec)
 
     exec_in_container(
@@ -180,7 +149,7 @@ def test_exec_in_container_login_shell_quotes_unsafe_argv(
 
 
 def test_exec_in_container_omits_user_flag_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
-    rec = RunRecorder([(0, "true\n", ""), (0, "", "")])
+    rec = FakeProc(scripted=[(0, "true\n", ""), (0, "", "")])
     monkeypatch.setattr(subprocess, "run", rec)
 
     exec_in_container(docker_cfg(), ["echo", "hi"], workdir="/work")
@@ -195,7 +164,7 @@ def test_exec_in_container_omits_user_flag_when_unset(monkeypatch: pytest.Monkey
 def test_exec_in_container_prepends_exec_prefix_without_user(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    rec = RunRecorder([(0, "true\n", ""), (0, "", "")])
+    rec = FakeProc(scripted=[(0, "true\n", ""), (0, "", "")])
     monkeypatch.setattr(subprocess, "run", rec)
 
     exec_in_container(
@@ -213,7 +182,7 @@ def test_exec_in_container_prepends_exec_prefix_without_user(
 def test_exec_in_container_prepends_exec_prefix_with_user(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    rec = RunRecorder([(0, "true\n", ""), (0, "", "")])
+    rec = FakeProc(scripted=[(0, "true\n", ""), (0, "", "")])
     monkeypatch.setattr(subprocess, "run", rec)
 
     exec_in_container(
@@ -226,3 +195,29 @@ def test_exec_in_container_prepends_exec_prefix_with_user(
     # user 指定 → bash -lc 経由。prefix + argv が shlex.join で1引数化。
     assert flat[-3:-1] == ["bash", "-lc"]
     assert flat[-1] == "direnv exec . claude -p"
+
+
+def test_exec_in_container_timeout_is_container_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """docker exec timeout は ContainerError に詰め替えられる."""
+    calls: list[Sequence[str]] = []
+
+    def fake(
+        cmd: Sequence[str],
+        *,
+        capture_output: bool = False,
+        text: bool = False,
+        check: bool = False,
+        timeout: float | None = None,
+        input: str | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(list(cmd))
+        if list(cmd[:2]) == ["docker", "inspect"]:
+            return subprocess.CompletedProcess(
+                args=list(cmd), returncode=0, stdout="true\n", stderr=""
+            )
+        raise subprocess.TimeoutExpired(cmd=list(cmd), timeout=1.0)
+
+    monkeypatch.setattr(subprocess, "run", fake)
+
+    with pytest.raises(ContainerError, match="timed out"):
+        exec_in_container(docker_cfg(), ["echo", "hi"], workdir="/work")

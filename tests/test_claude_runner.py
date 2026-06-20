@@ -49,9 +49,9 @@ def test_run_claude_local_invokes_cli(monkeypatch: pytest.MonkeyPatch) -> None:
     def fake_run(
         cmd: Sequence[str],
         *,
-        capture_output: bool,
-        text: bool,
-        check: bool,
+        capture_output: bool = False,
+        text: bool = False,
+        check: bool = False,
         timeout: float | None = None,
         input: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
@@ -78,9 +78,9 @@ def test_run_claude_local_raises_on_error(monkeypatch: pytest.MonkeyPatch) -> No
     def fake_run(
         cmd: Sequence[str],
         *,
-        capture_output: bool,
-        text: bool,
-        check: bool,
+        capture_output: bool = False,
+        text: bool = False,
+        check: bool = False,
         timeout: float | None = None,
         input: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
@@ -98,9 +98,9 @@ def test_run_claude_local_raises_on_is_error_payload(monkeypatch: pytest.MonkeyP
     def fake_run(
         cmd: Sequence[str],
         *,
-        capture_output: bool,
-        text: bool,
-        check: bool,
+        capture_output: bool = False,
+        text: bool = False,
+        check: bool = False,
         timeout: float | None = None,
         input: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
@@ -115,9 +115,9 @@ def test_run_claude_local_detects_limit_reached(monkeypatch: pytest.MonkeyPatch)
     def fake_run(
         cmd: Sequence[str],
         *,
-        capture_output: bool,
-        text: bool,
-        check: bool,
+        capture_output: bool = False,
+        text: bool = False,
+        check: bool = False,
         timeout: float | None = None,
         input: str | None = None,
     ) -> subprocess.CompletedProcess[str]:

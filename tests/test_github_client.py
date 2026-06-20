@@ -35,10 +35,11 @@ class FakeRun:
         self,
         cmd: Sequence[str],
         *,
-        capture_output: bool,
-        text: bool,
-        check: bool,
+        capture_output: bool = False,
+        text: bool = False,
+        check: bool = False,
         timeout: float | None = None,
+        input: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
         self.calls.append(list(cmd))
         idx = cmd.index("--repo") + 1
@@ -105,6 +106,7 @@ def test_list_open_issues_raises_on_failure(monkeypatch: pytest.MonkeyPatch) -> 
         text: bool,
         check: bool,
         timeout: float | None = None,
+        input: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
         raise subprocess.CalledProcessError(
             returncode=1, cmd=list(cmd), output="", stderr="auth required"
@@ -141,6 +143,7 @@ def test_list_open_issues_invalid_json(monkeypatch: pytest.MonkeyPatch) -> None:
         text: bool,
         check: bool,
         timeout: float | None = None,
+        input: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(
             args=list(cmd), returncode=0, stdout="not json", stderr=""
@@ -161,6 +164,7 @@ def test_create_issue_parses_url(monkeypatch: pytest.MonkeyPatch) -> None:
         text: bool,
         check: bool,
         timeout: float | None = None,
+        input: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
         calls.append(list(cmd))
         return subprocess.CompletedProcess(
@@ -198,6 +202,7 @@ def test_create_issue_handles_unexpected_output(monkeypatch: pytest.MonkeyPatch)
         text: bool,
         check: bool,
         timeout: float | None = None,
+        input: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(
             args=list(cmd), returncode=0, stdout="garbage\n", stderr=""
@@ -216,6 +221,7 @@ def test_create_issue_failure(monkeypatch: pytest.MonkeyPatch) -> None:
         text: bool,
         check: bool,
         timeout: float | None = None,
+        input: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
         raise subprocess.CalledProcessError(
             returncode=1, cmd=list(cmd), output="", stderr="rate limited"
@@ -235,6 +241,7 @@ def test_resolve_gh_login_returns_stripped(monkeypatch: pytest.MonkeyPatch) -> N
         text: bool,
         check: bool,
         timeout: float | None = None,
+        input: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(
             args=list(cmd), returncode=0, stdout="alice\n", stderr=""
@@ -252,6 +259,7 @@ def test_resolve_gh_login_failure(monkeypatch: pytest.MonkeyPatch) -> None:
         text: bool,
         check: bool,
         timeout: float | None = None,
+        input: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
         raise subprocess.CalledProcessError(
             returncode=1, cmd=list(cmd), output="", stderr="auth required"

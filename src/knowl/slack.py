@@ -9,9 +9,12 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
+
+from knowl.claude_runner import ClaudeError
 
 SLACK_API = "https://slack.com/api/chat.postMessage"
 _LOG = logging.getLogger(__name__)
@@ -132,3 +135,47 @@ def format_error_alert(prefix: str, exc: BaseException) -> str:
     どの実行系のどの段階で失敗したかを 1 行で読み取れる形で渡す。
     """
     return f"❌ knowl {prefix}: {exc}"
+
+
+@dataclass(frozen=True, slots=True)
+class ClaudeErrorAlert:
+    """``ClaudeError`` を limit / generic に分類した結果.
+
+    cycle / adhoc どちらの呼び出し側でも notice (Slack 通知文) と reason
+    (``CycleResult.reason`` / ``AdhocResult.reason``) は同じテンプレでまとめたいので、
+    両系列で共通の構造に詰めて返す。
+    """
+
+    notice: str
+    reason: str
+    limit_reached: bool
+
+
+def classify_claude_error(
+    exc: ClaudeError,
+    *,
+    notice_prefix: str,
+    reason_label: str,
+) -> ClaudeErrorAlert:
+    """``ClaudeError`` を limit_reached / 通常エラーに分け、通知文と reason を生成する.
+
+    cycle.py / adhoc.py で同じ分岐を 2 重に書いていたので片側だけ直すバグの温床になる
+    のを防ぐためのヘルパ。 ``handle_step`` 風の完全テンプレ化はしない (return 型や
+    付帯フィールドが site ごとに違うため)。
+
+    - ``notice_prefix``: ``format_error_alert`` の prefix 引数 (例:
+      ``"cycle failed during prioritization"``).
+    - ``reason_label``: 通常エラー時の reason 文言の先頭ラベル (例: ``"prioritization"``
+      → ``"prioritization claude error: ..."``)。
+    """
+    if exc.limit_reached:
+        return ClaudeErrorAlert(
+            notice=build_limit_alert(str(exc)),
+            reason=f"claude limit reached: {exc}",
+            limit_reached=True,
+        )
+    return ClaudeErrorAlert(
+        notice=format_error_alert(notice_prefix, exc),
+        reason=f"{reason_label} claude error: {exc}",
+        limit_reached=False,
+    )

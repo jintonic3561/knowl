@@ -24,7 +24,7 @@ from knowl.prioritize import PriorityDecision, TaskKind
 from knowl.slack import (
     build_cycle_start_notice,
     build_cycle_summary,
-    build_limit_alert,
+    classify_claude_error,
     format_error_alert,
 )
 from knowl.tasks import TaskExecutionError
@@ -221,15 +221,13 @@ def _run_locked(
             session_threshold=cfg.thresholds.session_remaining_pct,
             weekly_threshold=cfg.thresholds.weekly_remaining_pct,
         )
-        if exc.limit_reached:
-            notify(build_limit_alert(str(exc)))
-            return AdhocResult(
-                kind=AdhocResultKind.ERROR, reason=f"claude limit reached: {exc}"
-            )
-        notify(format_error_alert("ad-hoc failed during task execution", exc))
-        return AdhocResult(
-            kind=AdhocResultKind.ERROR, reason=f"task claude error: {exc}"
+        alert = classify_claude_error(
+            exc,
+            notice_prefix="ad-hoc failed during task execution",
+            reason_label="task",
         )
+        notify(alert.notice)
+        return AdhocResult(kind=AdhocResultKind.ERROR, reason=alert.reason)
     except TaskExecutionError as exc:
         notify(format_error_alert("ad-hoc failed during task execution", exc))
         return AdhocResult(
