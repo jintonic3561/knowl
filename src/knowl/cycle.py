@@ -309,6 +309,7 @@ def run_cycle(
         issue_url=picked.url,
         outcome=f"{outcome.action}: {outcome.summary}".strip(": ").strip(),
         outcome_url=outcome.url,
+        outcome_url_label="PR" if outcome.kind is TaskKind.IMPLEMENTATION else "コメント",
         followups=outcome.followups,
     )
     notify(summary)

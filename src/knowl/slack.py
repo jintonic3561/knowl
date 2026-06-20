@@ -94,21 +94,20 @@ def build_cycle_summary(
     issue_url: str,
     outcome: str,
     outcome_url: str | None,
+    outcome_url_label: str = "PR",
     followups: Sequence[str],
 ) -> str:
     """R8 用の 1 サイクルサマリ文字列を生成する.
 
-    issue URL は header の ``repo#番号`` を Slack mrkdwn のリンクにする形で埋め込み、
-    タスクの成果物 URL (PR or コメント) があれば outcome 行を同様にリンク化する。
+    issue URL は header の ``repo#番号`` を Slack mrkdwn のリンクにする形で埋め込む。
+    タスクの成果物 URL (PR or コメント) は結果行と分離し、独立した URL 行として
+    出力する。outcome 文字列全体をリンク化すると長文で読みづらく、URL も判別しにくいため。
     """
     header = f"<{issue_url}|{repo}#{issue_number}>"
-    outcome_line = (
-        f"• 結果: <{outcome_url}|{outcome}>" if outcome_url else f"• 結果: {outcome}"
-    )
-    lines = [
-        f"✅ *{header}* — {issue_title}",
-        outcome_line,
-    ]
+    lines = [f"✅ *{header}* — {issue_title}"]
+    if outcome_url:
+        lines.append(f"• {outcome_url_label}: {outcome_url}")
+    lines.append(f"• 結果: {outcome}")
     if followups:
         lines.append("• Follow-up:")
         for f in followups:

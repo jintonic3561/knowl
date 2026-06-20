@@ -48,9 +48,28 @@ def test_build_cycle_summary_minimal() -> None:
     # issue URL と outcome URL が文中に含まれる
     assert "https://github.com/acme/widgets/issues/12" in text
     assert "https://github.com/acme/widgets/pull/34" in text
+    # outcome URL は専用行として独立し、結果文字列にリンクが埋め込まれない
+    assert "• PR: https://github.com/acme/widgets/pull/34" in text
+    assert "<https://github.com/acme/widgets/pull/34" not in text
+    # outcome URL 行は結果行より前にある
+    assert text.index("• PR: ") < text.index("• 結果: ")
 
 
-def test_build_cycle_summary_without_followups() -> None:
+def test_build_cycle_summary_uses_custom_url_label() -> None:
+    text = build_cycle_summary(
+        repo="a/b",
+        issue_number=7,
+        issue_title="調査",
+        issue_url="https://github.com/a/b/issues/7",
+        outcome="commented: ...",
+        outcome_url="https://github.com/a/b/issues/7#issuecomment-1",
+        outcome_url_label="コメント",
+        followups=[],
+    )
+    assert "• コメント: https://github.com/a/b/issues/7#issuecomment-1" in text
+
+
+def test_build_cycle_summary_without_outcome_url_omits_url_line() -> None:
     text = build_cycle_summary(
         repo="a/b",
         issue_number=1,
@@ -63,6 +82,9 @@ def test_build_cycle_summary_without_followups() -> None:
     assert "なし" in text
     # outcome_url 無しでも issue URL は出る
     assert "https://github.com/a/b/issues/1" in text
+    # URL 行は出さない (PR/コメントラベルが宙に浮かないように)
+    assert "• PR:" not in text
+    assert "• コメント:" not in text
 
 
 def test_build_limit_alert_mentions_limit() -> None:
