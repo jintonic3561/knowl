@@ -11,7 +11,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
-from knowl.claude_runner import ClaudeError
+from knowl.claude_runner import ClaudeError, escalate_limit_reached
 from knowl.config import AppConfig, ContainerConfig, RepoConfig
 from knowl.container import ContainerError
 from knowl.filters import exclude_blocked_issues
@@ -150,6 +150,12 @@ def run_cycle(
             executed=False, reason=f"prioritization failed: {exc}", usage=usage
         )
     except ClaudeError as exc:
+        escalate_limit_reached(
+            exc,
+            usage,
+            session_threshold=cfg.thresholds.session_remaining_pct,
+            weekly_threshold=cfg.thresholds.weekly_remaining_pct,
+        )
         if exc.limit_reached:
             _LOG.warning("claude limit reached during prioritization: %s", exc)
             notify(build_limit_alert(str(exc)))
@@ -230,6 +236,12 @@ def run_cycle(
     try:
         outcome = run_task(cfg, decision, picked)
     except ClaudeError as exc:
+        escalate_limit_reached(
+            exc,
+            usage,
+            session_threshold=cfg.thresholds.session_remaining_pct,
+            weekly_threshold=cfg.thresholds.weekly_remaining_pct,
+        )
         if exc.limit_reached:
             _LOG.warning("claude limit reached: %s", exc)
             notify(build_limit_alert(str(exc)))
