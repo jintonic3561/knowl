@@ -12,6 +12,7 @@ from knowl.config import (
     ConfigError,
     ContainerKind,
     RepoConfig,
+    TemplatesConfig,
     load_config,
 )
 
@@ -41,8 +42,9 @@ def test_load_minimal_uses_defaults(tmp_path: Path) -> None:
     assert cfg.thresholds.session_remaining_pct == 30
     assert cfg.thresholds.weekly_remaining_pct == 10
     assert cfg.slack.channel is None  # 環境変数優先
-    assert cfg.templates.implementation == Path("templates/implementation.md")
-    assert cfg.templates.investigation == Path("templates/investigation.md")
+    # 既定の相対パスは config.yaml の親ディレクトリ基準で resolve される
+    assert cfg.templates.implementation == (tmp_path / "templates/implementation.md").resolve()
+    assert cfg.templates.investigation == (tmp_path / "templates/investigation.md").resolve()
     assert len(cfg.repositories) == 1
     repo = cfg.repositories[0]
     assert repo.name == "acme/widgets"
@@ -85,7 +87,7 @@ def test_load_full(tmp_path: Path) -> None:
     assert cfg.thresholds.session_remaining_pct == 50
     assert cfg.thresholds.weekly_remaining_pct == 20
     assert cfg.slack.channel == "#ops"
-    assert cfg.templates.implementation == Path("prompts/impl.md")
+    assert cfg.templates.implementation == (tmp_path / "prompts/impl.md").resolve()
     assert cfg.repositories[0].container.kind == ContainerKind.DEVCONTAINER
     assert cfg.repositories[0].workdir == Path("/workspaces/widgets")
     assert cfg.repositories[1].container.kind == ContainerKind.DOCKER
@@ -250,6 +252,105 @@ def test_cron_interval_minutes_valid_multi_hour(tmp_path: Path) -> None:
     )
     cfg = load_config(cfg_path)
     assert cfg.cron_interval_minutes == 120
+
+
+def test_templates_resolve_relative_paths_against_base(tmp_path: Path) -> None:
+    base = tmp_path / "project"
+    base.mkdir()
+    cfg = TemplatesConfig(
+        implementation=Path("templates/impl.md"),
+        investigation=Path("prompts/inv.md"),
+    )
+    resolved = cfg.resolve(base)
+    assert resolved.implementation == (base / "templates/impl.md").resolve()
+    assert resolved.investigation == (base / "prompts/inv.md").resolve()
+
+
+def test_templates_resolve_keeps_absolute_paths(tmp_path: Path) -> None:
+    base = tmp_path / "project"
+    base.mkdir()
+    absolute_impl = (tmp_path / "abs/impl.md").resolve()
+    cfg = TemplatesConfig(
+        implementation=absolute_impl,
+        investigation=Path("rel/inv.md"),
+    )
+    resolved = cfg.resolve(base)
+    assert resolved.implementation == absolute_impl
+    assert resolved.investigation == (base / "rel/inv.md").resolve()
+
+
+def test_load_config_resolves_templates_when_config_in_subdir(tmp_path: Path) -> None:
+    """`knowl.yaml` と `templates/` が別ディレクトリにあっても相対パスが追える."""
+    sub = tmp_path / "config_dir"
+    sub.mkdir()
+    cfg_path = sub / "config.yaml"
+    cfg_path.write_text(
+        dedent(
+            """
+            templates:
+              implementation: ../templates/impl.md
+              investigation: ../templates/inv.md
+            repositories:
+              - name: a/b
+                container:
+                  kind: docker
+                  name: c
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    cfg = load_config(cfg_path)
+
+    assert cfg.templates.implementation == (tmp_path / "templates/impl.md").resolve()
+    assert cfg.templates.investigation == (tmp_path / "templates/inv.md").resolve()
+
+
+def test_load_config_keeps_absolute_template_paths(tmp_path: Path) -> None:
+    """絶対パスで指定された template は cwd / config dir のどちらにも影響されない."""
+    abs_impl = (tmp_path / "anywhere/impl.md").resolve()
+    cfg_path = write(
+        tmp_path,
+        f"""
+        templates:
+          implementation: {abs_impl}
+          investigation: rel/inv.md
+        repositories:
+          - name: a/b
+            container:
+              kind: docker
+              name: c
+        """,
+    )
+
+    cfg = load_config(cfg_path)
+
+    assert cfg.templates.implementation == abs_impl
+    assert cfg.templates.investigation == (tmp_path / "rel/inv.md").resolve()
+
+
+def test_load_config_independent_of_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """cwd を変えても template は config dir 基準で同じ絶対パスに resolve される."""
+    cfg_path = write(
+        tmp_path,
+        """
+        repositories:
+          - name: a/b
+            container:
+              kind: docker
+              name: c
+        """,
+    )
+
+    monkeypatch.chdir(tmp_path)
+    from_inside = load_config(cfg_path).templates.implementation
+
+    other = tmp_path.parent
+    monkeypatch.chdir(other)
+    from_outside = load_config(cfg_path).templates.implementation
+
+    assert from_inside == from_outside
+    assert from_inside == (tmp_path / "templates/implementation.md").resolve()
 
 
 def test_app_config_default_factory_invariants() -> None:

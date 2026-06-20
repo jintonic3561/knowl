@@ -9,6 +9,8 @@ thresholds:
 slack:
   channel: "#knowl"            # SLACK_CHANNEL 環境変数で上書き可
 
+# 相対パスは knowl.yaml の親ディレクトリ基準で resolve される (cwd 非依存)。
+# 絶対パスはそのまま使われる。
 templates:
   implementation: templates/implementation.md
   investigation: templates/investigation.md

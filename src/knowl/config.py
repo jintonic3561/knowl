@@ -86,6 +86,21 @@ class TemplatesConfig(BaseModel):
     implementation: Path = Path("templates/implementation.md")
     investigation: Path = Path("templates/investigation.md")
 
+    def resolve(self, base: Path) -> TemplatesConfig:
+        """`base` ディレクトリ基準で相対パスを resolve した新インスタンスを返す.
+
+        絶対パスはそのまま保持する。実行 cwd に依存せず常に同じ絶対パスへ
+        解決させるため、 ``load_config`` が config 親ディレクトリを base に渡す。
+        """
+        return TemplatesConfig(
+            implementation=_resolve_under(self.implementation, base),
+            investigation=_resolve_under(self.investigation, base),
+        )
+
+
+def _resolve_under(path: Path, base: Path) -> Path:
+    return path if path.is_absolute() else (base / path).resolve()
+
 
 class AppConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -124,6 +139,10 @@ def load_config(path: Path | str) -> AppConfig:
     if not isinstance(raw, dict):
         raise ConfigError("config root must be a mapping")
     try:
-        return AppConfig.model_validate(raw)
+        cfg = AppConfig.model_validate(raw)
     except ValidationError as exc:
         raise ConfigError(str(exc)) from exc
+    # template の相対パスは config 親ディレクトリ基準で resolve しておき、
+    # 実行 cwd への依存を断つ (別 cwd から CLI を起動しても同じ template を読む)。
+    base = p.parent.resolve()
+    return cfg.model_copy(update={"templates": cfg.templates.resolve(base)})
