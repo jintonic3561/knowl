@@ -25,6 +25,7 @@ from knowl.slack import (
     build_cycle_start_notice,
     build_cycle_summary,
     build_limit_alert,
+    format_error_alert,
 )
 from knowl.tasks import TaskExecutionError
 from knowl.usage import TokenExpiredError, UsageError
@@ -86,10 +87,6 @@ def _build_seed_issue_body(task_description: str, *, user: str) -> str:
         f"{task_description.rstrip()}\n\n"
         f"---\nTriggered via Slack by @{user}."
     )
-
-
-def _build_error_alert(prefix: str, exc: BaseException) -> str:
-    return f"❌ knowl ad-hoc failed during {prefix}: {exc}"
 
 
 def _find_repo(cfg: AppConfig, name: str) -> RepoConfig | None:
@@ -160,7 +157,7 @@ def _run_locked(
             kind=AdhocResultKind.ERROR, reason=f"oauth token expired: {exc}"
         )
     except UsageError as exc:
-        notify(_build_error_alert("usage fetch", exc))
+        notify(format_error_alert("ad-hoc failed during usage fetch", exc))
         return AdhocResult(
             kind=AdhocResultKind.ERROR, reason=f"usage fetch failed: {exc}"
         )
@@ -187,7 +184,7 @@ def _run_locked(
     try:
         issue = create_issue(repo_name, title=title, body=body)
     except GitHubError as exc:
-        notify(_build_error_alert("issue creation", exc))
+        notify(format_error_alert("ad-hoc failed during issue creation", exc))
         return AdhocResult(
             kind=AdhocResultKind.ERROR, reason=f"issue creation failed: {exc}"
         )
@@ -195,7 +192,7 @@ def _run_locked(
     try:
         ensure_container(repo.container)
     except ContainerError as exc:
-        notify(_build_error_alert("container start", exc))
+        notify(format_error_alert("ad-hoc failed during container start", exc))
         return AdhocResult(
             kind=AdhocResultKind.ERROR, reason=f"container start failed: {exc}"
         )
@@ -223,17 +220,17 @@ def _run_locked(
             return AdhocResult(
                 kind=AdhocResultKind.ERROR, reason=f"claude limit reached: {exc}"
             )
-        notify(_build_error_alert("task execution", exc))
+        notify(format_error_alert("ad-hoc failed during task execution", exc))
         return AdhocResult(
             kind=AdhocResultKind.ERROR, reason=f"task claude error: {exc}"
         )
     except TaskExecutionError as exc:
-        notify(_build_error_alert("task execution", exc))
+        notify(format_error_alert("ad-hoc failed during task execution", exc))
         return AdhocResult(
             kind=AdhocResultKind.ERROR, reason=f"task execution failed: {exc}"
         )
     except ContainerError as exc:
-        notify(_build_error_alert("container", exc))
+        notify(format_error_alert("ad-hoc failed during container", exc))
         return AdhocResult(
             kind=AdhocResultKind.ERROR, reason=f"container operation failed: {exc}"
         )

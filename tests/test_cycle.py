@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from collections.abc import Callable
 
 import pytest
 
 from knowl.claude_runner import ClaudeError
-from knowl.config import AppConfig, RepoConfig, TemplatesConfig
+from knowl.config import AppConfig
 from knowl.cycle import CycleResult, run_cycle
 from knowl.github_client import IssueRef
 from knowl.prioritize import PriorityDecision, TaskKind
@@ -15,44 +15,11 @@ from knowl.tasks import TaskOutcome
 from knowl.usage import UsageSnapshot
 
 
-def repo() -> RepoConfig:
-    return RepoConfig.model_validate(
-        {"name": "acme/widgets", "container": {"kind": "docker", "name": "c"}}
-    )
-
-
-def app_cfg(tmp_path: Path) -> AppConfig:
-    impl = tmp_path / "impl.md"
-    impl.write_text("p", encoding="utf-8")
-    inv = tmp_path / "inv.md"
-    inv.write_text("p", encoding="utf-8")
-    return AppConfig(
-        templates=TemplatesConfig(implementation=impl, investigation=inv),
-        repositories=[repo()],
-    )
-
-
-def make_issue(
-    repo_name: str = "acme/widgets",
-    number: int = 1,
-    *,
-    labels: tuple[str, ...] = (),
-    linked_pr_count: int = 0,
-) -> IssueRef:
-    return IssueRef(
-        repo=repo_name,
-        number=number,
-        title="t",
-        body="b",
-        labels=labels,
-        url=f"https://github.com/{repo_name}/issues/{number}",
-        updated_at="2026-06-01T00:00:00Z",
-        linked_pr_count=linked_pr_count,
-    )
-
-
-def test_run_cycle_no_op_when_gate_blocks(tmp_path: Path) -> None:
-    cfg = app_cfg(tmp_path)
+def test_run_cycle_no_op_when_gate_blocks(
+    app_cfg: Callable[..., AppConfig],
+    make_issue: Callable[..., IssueRef],
+) -> None:
+    cfg = app_cfg()
 
     notifications: list[str] = []
 
@@ -81,14 +48,14 @@ def test_run_cycle_no_op_when_gate_blocks(tmp_path: Path) -> None:
     assert notifications == []  # ゲートブロックは通知しない
 
 
-def test_run_cycle_no_op_when_no_issues(tmp_path: Path) -> None:
-    cfg = app_cfg(tmp_path)
+def test_run_cycle_no_op_when_no_issues(
+    app_cfg: Callable[..., AppConfig], ok_snapshot: UsageSnapshot
+) -> None:
+    cfg = app_cfg()
     posted: list[str] = []
     result = run_cycle(
         cfg,
-        fetch_usage=lambda: UsageSnapshot(
-            session_remaining_pct=80, weekly_remaining_pct=80
-        ),
+        fetch_usage=lambda: ok_snapshot,
         list_issues=lambda repos: [],
         prioritize=lambda issues, **_: (  # pragma: no cover
             PriorityDecision(
@@ -110,15 +77,15 @@ def test_run_cycle_no_op_when_no_issues(tmp_path: Path) -> None:
     assert "issue" in posted[0].lower() or "進めるべき" in posted[0]
 
 
-def test_run_cycle_suppresses_idle_notice_when_requested(tmp_path: Path) -> None:
+def test_run_cycle_suppresses_idle_notice_when_requested(
+    app_cfg: Callable[..., AppConfig], ok_snapshot: UsageSnapshot
+) -> None:
     """前回 idle だった場合の連続通知抑止: idle ケースで notify を呼ばない."""
-    cfg = app_cfg(tmp_path)
+    cfg = app_cfg()
     posted: list[str] = []
     result = run_cycle(
         cfg,
-        fetch_usage=lambda: UsageSnapshot(
-            session_remaining_pct=80, weekly_remaining_pct=80
-        ),
+        fetch_usage=lambda: ok_snapshot,
         list_issues=lambda repos: [],
         prioritize=lambda issues, **_: pytest.fail(  # pragma: no cover
             "prioritize must not be invoked when no issues"
@@ -136,16 +103,18 @@ def test_run_cycle_suppresses_idle_notice_when_requested(tmp_path: Path) -> None
     assert posted == []
 
 
-def test_run_cycle_idle_when_all_blocked(tmp_path: Path) -> None:
+def test_run_cycle_idle_when_all_blocked(
+    app_cfg: Callable[..., AppConfig],
+    make_issue: Callable[..., IssueRef],
+    ok_snapshot: UsageSnapshot,
+) -> None:
     from knowl.filters import INVESTIGATED_LABEL
 
-    cfg = app_cfg(tmp_path)
+    cfg = app_cfg()
     posted: list[str] = []
     result = run_cycle(
         cfg,
-        fetch_usage=lambda: UsageSnapshot(
-            session_remaining_pct=80, weekly_remaining_pct=80
-        ),
+        fetch_usage=lambda: ok_snapshot,
         list_issues=lambda repos: [make_issue(labels=(INVESTIGATED_LABEL,))],
         prioritize=lambda issues, **_: pytest.fail(  # pragma: no cover
             "prioritize must not be invoked"
@@ -162,10 +131,14 @@ def test_run_cycle_idle_when_all_blocked(tmp_path: Path) -> None:
     assert posted == []
 
 
-def test_run_cycle_idle_when_no_actionable_issue_suppressed(tmp_path: Path) -> None:
+def test_run_cycle_idle_when_no_actionable_issue_suppressed(
+    app_cfg: Callable[..., AppConfig],
+    make_issue: Callable[..., IssueRef],
+    ok_snapshot: UsageSnapshot,
+) -> None:
     from knowl.prioritize import NoActionableIssue
 
-    cfg = app_cfg(tmp_path)
+    cfg = app_cfg()
     posted: list[str] = []
 
     def prioritize(
@@ -175,9 +148,7 @@ def test_run_cycle_idle_when_no_actionable_issue_suppressed(tmp_path: Path) -> N
 
     result = run_cycle(
         cfg,
-        fetch_usage=lambda: UsageSnapshot(
-            session_remaining_pct=80, weekly_remaining_pct=80
-        ),
+        fetch_usage=lambda: ok_snapshot,
         list_issues=lambda repos: [make_issue()],
         prioritize=prioritize,
         run_task=lambda *a, **kw: pytest.fail(  # pragma: no cover
@@ -194,9 +165,11 @@ def test_run_cycle_idle_when_no_actionable_issue_suppressed(tmp_path: Path) -> N
     assert posted == []
 
 
-def test_run_cycle_does_not_suppress_error_notice(tmp_path: Path) -> None:
+def test_run_cycle_does_not_suppress_error_notice(
+    app_cfg: Callable[..., AppConfig], ok_snapshot: UsageSnapshot
+) -> None:
     """エラー通知は suppress_idle_notice=True でも常に飛ぶ."""
-    cfg = app_cfg(tmp_path)
+    cfg = app_cfg()
     posted: list[str] = []
 
     def list_issues(_repos: object) -> list[IssueRef]:
@@ -206,9 +179,7 @@ def test_run_cycle_does_not_suppress_error_notice(tmp_path: Path) -> None:
 
     result = run_cycle(
         cfg,
-        fetch_usage=lambda: UsageSnapshot(
-            session_remaining_pct=80, weekly_remaining_pct=80
-        ),
+        fetch_usage=lambda: ok_snapshot,
         list_issues=list_issues,
         prioritize=lambda issues, **_: pytest.fail(  # pragma: no cover
             "prioritize must not be invoked"
@@ -227,10 +198,14 @@ def test_run_cycle_does_not_suppress_error_notice(tmp_path: Path) -> None:
     assert "issue collection" in posted[0]
 
 
-def test_run_cycle_no_op_when_all_issues_blocked(tmp_path: Path) -> None:
+def test_run_cycle_no_op_when_all_issues_blocked(
+    app_cfg: Callable[..., AppConfig],
+    make_issue: Callable[..., IssueRef],
+    ok_snapshot: UsageSnapshot,
+) -> None:
     from knowl.filters import INVESTIGATED_LABEL
 
-    cfg = app_cfg(tmp_path)
+    cfg = app_cfg()
     posted: list[str] = []
 
     blocked_issues = [
@@ -240,9 +215,7 @@ def test_run_cycle_no_op_when_all_issues_blocked(tmp_path: Path) -> None:
 
     result = run_cycle(
         cfg,
-        fetch_usage=lambda: UsageSnapshot(
-            session_remaining_pct=80, weekly_remaining_pct=80
-        ),
+        fetch_usage=lambda: ok_snapshot,
         list_issues=lambda repos: blocked_issues,
         prioritize=lambda issues, **_: pytest.fail(  # pragma: no cover
             "prioritize must not be invoked when all issues are blocked"
@@ -261,10 +234,14 @@ def test_run_cycle_no_op_when_all_issues_blocked(tmp_path: Path) -> None:
     assert "💤" in posted[0]
 
 
-def test_run_cycle_filters_blocked_before_prioritize(tmp_path: Path) -> None:
+def test_run_cycle_filters_blocked_before_prioritize(
+    app_cfg: Callable[..., AppConfig],
+    make_issue: Callable[..., IssueRef],
+    ok_snapshot: UsageSnapshot,
+) -> None:
     from knowl.filters import INVESTIGATED_LABEL
 
-    cfg = app_cfg(tmp_path)
+    cfg = app_cfg()
     posted: list[str] = []
 
     actionable = make_issue(number=1)
@@ -302,9 +279,7 @@ def test_run_cycle_filters_blocked_before_prioritize(tmp_path: Path) -> None:
 
     result = run_cycle(
         cfg,
-        fetch_usage=lambda: UsageSnapshot(
-            session_remaining_pct=80, weekly_remaining_pct=80
-        ),
+        fetch_usage=lambda: ok_snapshot,
         list_issues=lambda repos: issues,
         prioritize=prioritize,
         run_task=run_task,
@@ -315,10 +290,14 @@ def test_run_cycle_filters_blocked_before_prioritize(tmp_path: Path) -> None:
     assert result.issue is actionable
 
 
-def test_run_cycle_no_op_when_no_actionable_issue(tmp_path: Path) -> None:
+def test_run_cycle_no_op_when_no_actionable_issue(
+    app_cfg: Callable[..., AppConfig],
+    make_issue: Callable[..., IssueRef],
+    ok_snapshot: UsageSnapshot,
+) -> None:
     from knowl.prioritize import NoActionableIssue
 
-    cfg = app_cfg(tmp_path)
+    cfg = app_cfg()
     posted: list[str] = []
 
     def prioritize(
@@ -328,9 +307,7 @@ def test_run_cycle_no_op_when_no_actionable_issue(tmp_path: Path) -> None:
 
     result = run_cycle(
         cfg,
-        fetch_usage=lambda: UsageSnapshot(
-            session_remaining_pct=80, weekly_remaining_pct=80
-        ),
+        fetch_usage=lambda: ok_snapshot,
         list_issues=lambda repos: [make_issue()],
         prioritize=prioritize,
         run_task=lambda *a, **kw: pytest.fail(  # pragma: no cover
@@ -348,8 +325,12 @@ def test_run_cycle_no_op_when_no_actionable_issue(tmp_path: Path) -> None:
     assert "waiting" in posted[0].lower() or "review" in posted[0].lower()
 
 
-def test_run_cycle_happy_path(tmp_path: Path) -> None:
-    cfg = app_cfg(tmp_path)
+def test_run_cycle_happy_path(
+    app_cfg: Callable[..., AppConfig],
+    make_issue: Callable[..., IssueRef],
+    ok_snapshot: UsageSnapshot,
+) -> None:
+    cfg = app_cfg()
     posted: list[str] = []
     ensured: list[str] = []
 
@@ -388,9 +369,7 @@ def test_run_cycle_happy_path(tmp_path: Path) -> None:
 
     result = run_cycle(
         cfg,
-        fetch_usage=lambda: UsageSnapshot(
-            session_remaining_pct=80, weekly_remaining_pct=80
-        ),
+        fetch_usage=lambda: ok_snapshot,
         list_issues=lambda repos: [fixture_issue],
         prioritize=prioritize,
         run_task=run_task,
@@ -414,11 +393,15 @@ def test_run_cycle_happy_path(tmp_path: Path) -> None:
     assert "https://pr/1" in posted[1]
 
 
-def test_run_cycle_overrides_kind_from_label(tmp_path: Path) -> None:
+def test_run_cycle_overrides_kind_from_label(
+    app_cfg: Callable[..., AppConfig],
+    make_issue: Callable[..., IssueRef],
+    ok_snapshot: UsageSnapshot,
+) -> None:
     """ラベルが付いた issue では Claude 判定より優先してラベルから kind を決める."""
     from knowl.prioritize import IMPLEMENTATION_LABEL
 
-    cfg = app_cfg(tmp_path)
+    cfg = app_cfg()
     posted: list[str] = []
 
     fixture_issue = make_issue(number=1, labels=(IMPLEMENTATION_LABEL,))
@@ -446,9 +429,7 @@ def test_run_cycle_overrides_kind_from_label(tmp_path: Path) -> None:
 
     result = run_cycle(
         cfg,
-        fetch_usage=lambda: UsageSnapshot(
-            session_remaining_pct=80, weekly_remaining_pct=80
-        ),
+        fetch_usage=lambda: ok_snapshot,
         list_issues=lambda repos: [fixture_issue],
         prioritize=prioritize,
         run_task=run_task,
@@ -462,9 +443,13 @@ def test_run_cycle_overrides_kind_from_label(tmp_path: Path) -> None:
     assert result.decision.kind is TaskKind.IMPLEMENTATION
 
 
-def test_run_cycle_uses_claude_kind_when_no_label(tmp_path: Path) -> None:
+def test_run_cycle_uses_claude_kind_when_no_label(
+    app_cfg: Callable[..., AppConfig],
+    make_issue: Callable[..., IssueRef],
+    ok_snapshot: UsageSnapshot,
+) -> None:
     """ラベル無しのときは Claude が返した kind をそのまま使う (フォールバック)."""
-    cfg = app_cfg(tmp_path)
+    cfg = app_cfg()
 
     fixture_issue = make_issue(number=1, labels=())
     fixture_decision = PriorityDecision(
@@ -490,9 +475,7 @@ def test_run_cycle_uses_claude_kind_when_no_label(tmp_path: Path) -> None:
 
     result = run_cycle(
         cfg,
-        fetch_usage=lambda: UsageSnapshot(
-            session_remaining_pct=80, weekly_remaining_pct=80
-        ),
+        fetch_usage=lambda: ok_snapshot,
         list_issues=lambda repos: [fixture_issue],
         prioritize=prioritize,
         run_task=run_task,
@@ -504,11 +487,15 @@ def test_run_cycle_uses_claude_kind_when_no_label(tmp_path: Path) -> None:
     assert received and received[0].kind is TaskKind.INVESTIGATION
 
 
-def test_run_cycle_falls_back_when_both_labels_present(tmp_path: Path) -> None:
+def test_run_cycle_falls_back_when_both_labels_present(
+    app_cfg: Callable[..., AppConfig],
+    make_issue: Callable[..., IssueRef],
+    ok_snapshot: UsageSnapshot,
+) -> None:
     """両ラベルが付いていて矛盾しているときは Claude 判定にフォールバック."""
     from knowl.prioritize import IMPLEMENTATION_LABEL, INVESTIGATION_LABEL
 
-    cfg = app_cfg(tmp_path)
+    cfg = app_cfg()
 
     fixture_issue = make_issue(
         number=1, labels=(IMPLEMENTATION_LABEL, INVESTIGATION_LABEL)
@@ -536,9 +523,7 @@ def test_run_cycle_falls_back_when_both_labels_present(tmp_path: Path) -> None:
 
     result = run_cycle(
         cfg,
-        fetch_usage=lambda: UsageSnapshot(
-            session_remaining_pct=80, weekly_remaining_pct=80
-        ),
+        fetch_usage=lambda: ok_snapshot,
         list_issues=lambda repos: [fixture_issue],
         prioritize=prioritize,
         run_task=run_task,
@@ -551,8 +536,12 @@ def test_run_cycle_falls_back_when_both_labels_present(tmp_path: Path) -> None:
     assert received and received[0].kind is TaskKind.INVESTIGATION
 
 
-def test_run_cycle_container_start_failure_notifies(tmp_path: Path) -> None:
-    cfg = app_cfg(tmp_path)
+def test_run_cycle_container_start_failure_notifies(
+    app_cfg: Callable[..., AppConfig],
+    make_issue: Callable[..., IssueRef],
+    ok_snapshot: UsageSnapshot,
+) -> None:
+    cfg = app_cfg()
     posted: list[str] = []
 
     def ensure_container(_c: object) -> None:
@@ -562,9 +551,7 @@ def test_run_cycle_container_start_failure_notifies(tmp_path: Path) -> None:
 
     result = run_cycle(
         cfg,
-        fetch_usage=lambda: UsageSnapshot(
-            session_remaining_pct=80, weekly_remaining_pct=80
-        ),
+        fetch_usage=lambda: ok_snapshot,
         list_issues=lambda repos: [make_issue()],
         prioritize=lambda issues, **_: (
             PriorityDecision(
@@ -586,8 +573,12 @@ def test_run_cycle_container_start_failure_notifies(tmp_path: Path) -> None:
     assert not any("開始" in p for p in posted)
 
 
-def test_run_cycle_handles_limit_alert(tmp_path: Path) -> None:
-    cfg = app_cfg(tmp_path)
+def test_run_cycle_handles_limit_alert(
+    app_cfg: Callable[..., AppConfig],
+    make_issue: Callable[..., IssueRef],
+    ok_snapshot: UsageSnapshot,
+) -> None:
+    cfg = app_cfg()
     posted: list[str] = []
 
     def run_task(
@@ -597,9 +588,7 @@ def test_run_cycle_handles_limit_alert(tmp_path: Path) -> None:
 
     result = run_cycle(
         cfg,
-        fetch_usage=lambda: UsageSnapshot(
-            session_remaining_pct=80, weekly_remaining_pct=80
-        ),
+        fetch_usage=lambda: ok_snapshot,
         list_issues=lambda repos: [make_issue()],
         prioritize=lambda issues, **_: (
             PriorityDecision(
@@ -617,8 +606,11 @@ def test_run_cycle_handles_limit_alert(tmp_path: Path) -> None:
     assert any("limit" in p.lower() for p in posted)
 
 
-def test_run_cycle_usage_error_notifies(tmp_path: Path) -> None:
-    cfg = app_cfg(tmp_path)
+def test_run_cycle_usage_error_notifies(
+    app_cfg: Callable[..., AppConfig],
+    make_issue: Callable[..., IssueRef],
+) -> None:
+    cfg = app_cfg()
     posted: list[str] = []
 
     def fetch_usage() -> UsageSnapshot:
@@ -647,8 +639,10 @@ def test_run_cycle_usage_error_notifies(tmp_path: Path) -> None:
     assert any("usage fetch" in p for p in posted)
 
 
-def test_run_cycle_github_error_notifies(tmp_path: Path) -> None:
-    cfg = app_cfg(tmp_path)
+def test_run_cycle_github_error_notifies(
+    app_cfg: Callable[..., AppConfig], ok_snapshot: UsageSnapshot
+) -> None:
+    cfg = app_cfg()
     posted: list[str] = []
 
     def list_issues(_repos: object) -> list[IssueRef]:
@@ -658,9 +652,7 @@ def test_run_cycle_github_error_notifies(tmp_path: Path) -> None:
 
     result = run_cycle(
         cfg,
-        fetch_usage=lambda: UsageSnapshot(
-            session_remaining_pct=80, weekly_remaining_pct=80
-        ),
+        fetch_usage=lambda: ok_snapshot,
         list_issues=list_issues,
         prioritize=lambda issues, **_: (
             PriorityDecision(
@@ -679,8 +671,12 @@ def test_run_cycle_github_error_notifies(tmp_path: Path) -> None:
     assert any("issue collection" in p for p in posted)
 
 
-def test_run_cycle_prioritization_error_notifies(tmp_path: Path) -> None:
-    cfg = app_cfg(tmp_path)
+def test_run_cycle_prioritization_error_notifies(
+    app_cfg: Callable[..., AppConfig],
+    make_issue: Callable[..., IssueRef],
+    ok_snapshot: UsageSnapshot,
+) -> None:
+    cfg = app_cfg()
     posted: list[str] = []
 
     def prioritize(
@@ -692,9 +688,7 @@ def test_run_cycle_prioritization_error_notifies(tmp_path: Path) -> None:
 
     result = run_cycle(
         cfg,
-        fetch_usage=lambda: UsageSnapshot(
-            session_remaining_pct=80, weekly_remaining_pct=80
-        ),
+        fetch_usage=lambda: ok_snapshot,
         list_issues=lambda repos: [make_issue()],
         prioritize=prioritize,
         run_task=lambda *a, **kw: TaskOutcome(
@@ -708,8 +702,11 @@ def test_run_cycle_prioritization_error_notifies(tmp_path: Path) -> None:
     assert any("prioritization" in p for p in posted)
 
 
-def test_run_cycle_token_expired_uses_dedicated_message(tmp_path: Path) -> None:
-    cfg = app_cfg(tmp_path)
+def test_run_cycle_token_expired_uses_dedicated_message(
+    app_cfg: Callable[..., AppConfig],
+    make_issue: Callable[..., IssueRef],
+) -> None:
+    cfg = app_cfg()
     posted: list[str] = []
 
     def fetch_usage() -> UsageSnapshot:
@@ -738,8 +735,12 @@ def test_run_cycle_token_expired_uses_dedicated_message(tmp_path: Path) -> None:
     assert any("🔐" in p and "expired" in p.lower() for p in posted)
 
 
-def test_run_cycle_container_error_notifies(tmp_path: Path) -> None:
-    cfg = app_cfg(tmp_path)
+def test_run_cycle_container_error_notifies(
+    app_cfg: Callable[..., AppConfig],
+    make_issue: Callable[..., IssueRef],
+    ok_snapshot: UsageSnapshot,
+) -> None:
+    cfg = app_cfg()
     posted: list[str] = []
 
     def run_task(
@@ -751,9 +752,7 @@ def test_run_cycle_container_error_notifies(tmp_path: Path) -> None:
 
     result = run_cycle(
         cfg,
-        fetch_usage=lambda: UsageSnapshot(
-            session_remaining_pct=80, weekly_remaining_pct=80
-        ),
+        fetch_usage=lambda: ok_snapshot,
         list_issues=lambda repos: [make_issue()],
         prioritize=lambda issues, **_: (
             PriorityDecision(
@@ -770,8 +769,12 @@ def test_run_cycle_container_error_notifies(tmp_path: Path) -> None:
     assert any("container" in p for p in posted)
 
 
-def test_run_cycle_task_execution_error_notifies(tmp_path: Path) -> None:
-    cfg = app_cfg(tmp_path)
+def test_run_cycle_task_execution_error_notifies(
+    app_cfg: Callable[..., AppConfig],
+    make_issue: Callable[..., IssueRef],
+    ok_snapshot: UsageSnapshot,
+) -> None:
+    cfg = app_cfg()
     posted: list[str] = []
 
     def run_task(
@@ -783,9 +786,7 @@ def test_run_cycle_task_execution_error_notifies(tmp_path: Path) -> None:
 
     result = run_cycle(
         cfg,
-        fetch_usage=lambda: UsageSnapshot(
-            session_remaining_pct=80, weekly_remaining_pct=80
-        ),
+        fetch_usage=lambda: ok_snapshot,
         list_issues=lambda repos: [make_issue()],
         prioritize=lambda issues, **_: (
             PriorityDecision(
@@ -802,8 +803,12 @@ def test_run_cycle_task_execution_error_notifies(tmp_path: Path) -> None:
     assert any("task execution" in p for p in posted)
 
 
-def test_run_cycle_propagates_unknown_error(tmp_path: Path) -> None:
-    cfg = app_cfg(tmp_path)
+def test_run_cycle_propagates_unknown_error(
+    app_cfg: Callable[..., AppConfig],
+    make_issue: Callable[..., IssueRef],
+    ok_snapshot: UsageSnapshot,
+) -> None:
+    cfg = app_cfg()
 
     def run_task(
         cfg: AppConfig, decision: PriorityDecision, issue: IssueRef
@@ -813,9 +818,7 @@ def test_run_cycle_propagates_unknown_error(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError):
         run_cycle(
             cfg,
-            fetch_usage=lambda: UsageSnapshot(
-                session_remaining_pct=80, weekly_remaining_pct=80
-            ),
+            fetch_usage=lambda: ok_snapshot,
             list_issues=lambda repos: [make_issue()],
             prioritize=lambda issues, **_: (
                 PriorityDecision(

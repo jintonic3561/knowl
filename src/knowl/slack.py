@@ -123,3 +123,12 @@ def build_limit_alert(reason: str) -> str:
 def build_idle_notice(reason: str) -> str:
     """進めるべき issue がないときの簡潔な通知."""
     return f"💤 knowl: 進めるべき issue なし — {reason}"
+
+
+def format_error_alert(prefix: str, exc: BaseException) -> str:
+    """サイクル失敗時の Slack 通知文.
+
+    ``prefix`` は ``"cycle failed during usage fetch"`` のように、
+    どの実行系のどの段階で失敗したかを 1 行で読み取れる形で渡す。
+    """
+    return f"❌ knowl {prefix}: {exc}"

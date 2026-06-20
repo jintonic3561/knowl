@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from pathlib import Path
 
 import pytest
 
@@ -14,7 +13,7 @@ from knowl.adhoc import (
     build_seed_issue_title,
     run_adhoc,
 )
-from knowl.config import AppConfig, RepoConfig, TemplatesConfig
+from knowl.config import AppConfig
 from knowl.github_client import GitHubError, IssueRef
 from knowl.prioritize import PriorityDecision, TaskKind
 from knowl.tasks import TaskOutcome
@@ -31,33 +30,8 @@ def _busy_lock() -> Iterator[bool]:
     yield False
 
 
-def _repo() -> RepoConfig:
-    return RepoConfig.model_validate(
-        {"name": "acme/widgets", "container": {"kind": "docker", "name": "c"}}
-    )
-
-
-def _cfg(tmp_path: Path) -> AppConfig:
-    impl = tmp_path / "impl.md"
-    impl.write_text("p", encoding="utf-8")
-    inv = tmp_path / "inv.md"
-    inv.write_text("p", encoding="utf-8")
-    return AppConfig(
-        templates=TemplatesConfig(implementation=impl, investigation=inv),
-        repositories=[_repo()],
-    )
-
-
-def _issue(number: int = 99) -> IssueRef:
-    return IssueRef(
-        repo="acme/widgets",
-        number=number,
-        title="seed",
-        body="body",
-        labels=(),
-        url=f"https://github.com/acme/widgets/issues/{number}",
-        updated_at="",
-    )
+def _make_seed(make_issue: Callable[..., IssueRef], number: int = 99) -> IssueRef:
+    return make_issue(number=number, title="seed", body="body", updated_at="")
 
 
 def test_build_seed_issue_title_truncates_long_input() -> None:
@@ -79,14 +53,17 @@ def test_build_seed_issue_title_first_line_only() -> None:
     assert title.startswith("first line")
 
 
-def test_run_adhoc_gate_blocked(tmp_path: Path) -> None:
-    cfg = _cfg(tmp_path)
+def test_run_adhoc_gate_blocked(
+    app_cfg: Callable[..., AppConfig],
+    make_issue: Callable[..., IssueRef],
+) -> None:
+    cfg = app_cfg()
     posted: list[str] = []
     created: list[tuple[str, str, str]] = []
 
     def create_issue(repo_name: str, *, title: str, body: str) -> IssueRef:
         created.append((repo_name, title, body))
-        return _issue()
+        return _make_seed(make_issue)
 
     result = run_adhoc(
         cfg,
@@ -109,8 +86,10 @@ def test_run_adhoc_gate_blocked(tmp_path: Path) -> None:
     assert posted == []  # ゲートブロックは Slack 通知に流さない
 
 
-def test_run_adhoc_unknown_repo(tmp_path: Path) -> None:
-    cfg = _cfg(tmp_path)
+def test_run_adhoc_unknown_repo(
+    app_cfg: Callable[..., AppConfig], ok_snapshot: UsageSnapshot
+) -> None:
+    cfg = app_cfg()
     posted: list[str] = []
 
     result = run_adhoc(
@@ -118,9 +97,7 @@ def test_run_adhoc_unknown_repo(tmp_path: Path) -> None:
         repo_name="foo/bar",
         task_description="task",
         user="alice",
-        fetch_usage=lambda: UsageSnapshot(
-            session_remaining_pct=80, weekly_remaining_pct=80
-        ),
+        fetch_usage=lambda: ok_snapshot,
         create_issue=lambda *a, **kw: pytest.fail(
             "must not call create_issue for unknown repo"
         ),
@@ -136,12 +113,16 @@ def test_run_adhoc_unknown_repo(tmp_path: Path) -> None:
     assert posted == []
 
 
-def test_run_adhoc_happy_path(tmp_path: Path) -> None:
-    cfg = _cfg(tmp_path)
+def test_run_adhoc_happy_path(
+    app_cfg: Callable[..., AppConfig],
+    make_issue: Callable[..., IssueRef],
+    ok_snapshot: UsageSnapshot,
+) -> None:
+    cfg = app_cfg()
     posted: list[str] = []
     ensured: list[str] = []
 
-    seed = _issue(number=99)
+    seed = _make_seed(make_issue, number=99)
     create_calls: list[tuple[str, str, str]] = []
 
     def create_issue(repo_name: str, *, title: str, body: str) -> IssueRef:
@@ -174,9 +155,7 @@ def test_run_adhoc_happy_path(tmp_path: Path) -> None:
         repo_name="acme/widgets",
         task_description="do something useful",
         user="alice",
-        fetch_usage=lambda: UsageSnapshot(
-            session_remaining_pct=80, weekly_remaining_pct=80
-        ),
+        fetch_usage=lambda: ok_snapshot,
         create_issue=create_issue,
         ensure_container=ensure_container,
         run_task=run_task,
@@ -202,8 +181,10 @@ def test_run_adhoc_happy_path(tmp_path: Path) -> None:
     assert decisions[0].number == 99
 
 
-def test_run_adhoc_create_issue_failure(tmp_path: Path) -> None:
-    cfg = _cfg(tmp_path)
+def test_run_adhoc_create_issue_failure(
+    app_cfg: Callable[..., AppConfig], ok_snapshot: UsageSnapshot
+) -> None:
+    cfg = app_cfg()
     posted: list[str] = []
 
     def create_issue(repo_name: str, *, title: str, body: str) -> IssueRef:
@@ -214,9 +195,7 @@ def test_run_adhoc_create_issue_failure(tmp_path: Path) -> None:
         repo_name="acme/widgets",
         task_description="task",
         user="alice",
-        fetch_usage=lambda: UsageSnapshot(
-            session_remaining_pct=80, weekly_remaining_pct=80
-        ),
+        fetch_usage=lambda: ok_snapshot,
         create_issue=create_issue,
         ensure_container=lambda _: pytest.fail("must not be called"),
         run_task=lambda *a, **kw: pytest.fail("must not be called"),
@@ -231,8 +210,10 @@ def test_run_adhoc_create_issue_failure(tmp_path: Path) -> None:
     assert isinstance(result, AdhocResult)
 
 
-def test_run_adhoc_busy_when_lock_unavailable(tmp_path: Path) -> None:
-    cfg = _cfg(tmp_path)
+def test_run_adhoc_busy_when_lock_unavailable(
+    app_cfg: Callable[..., AppConfig],
+) -> None:
+    cfg = app_cfg()
 
     result = run_adhoc(
         cfg,
@@ -250,10 +231,14 @@ def test_run_adhoc_busy_when_lock_unavailable(tmp_path: Path) -> None:
     assert result.kind is AdhocResultKind.BUSY
 
 
-def test_run_adhoc_task_limit_reached(tmp_path: Path) -> None:
+def test_run_adhoc_task_limit_reached(
+    app_cfg: Callable[..., AppConfig],
+    make_issue: Callable[..., IssueRef],
+    ok_snapshot: UsageSnapshot,
+) -> None:
     from knowl.claude_runner import ClaudeError
 
-    cfg = _cfg(tmp_path)
+    cfg = app_cfg()
     posted: list[str] = []
 
     def run_task(*a: object, **kw: object) -> TaskOutcome:
@@ -264,10 +249,8 @@ def test_run_adhoc_task_limit_reached(tmp_path: Path) -> None:
         repo_name="acme/widgets",
         task_description="task",
         user="alice",
-        fetch_usage=lambda: UsageSnapshot(
-            session_remaining_pct=80, weekly_remaining_pct=80
-        ),
-        create_issue=lambda *a, **kw: _issue(),
+        fetch_usage=lambda: ok_snapshot,
+        create_issue=lambda *a, **kw: _make_seed(make_issue),
         ensure_container=lambda _: None,
         run_task=run_task,
         notify=posted.append,
@@ -279,8 +262,10 @@ def test_run_adhoc_task_limit_reached(tmp_path: Path) -> None:
     assert any("limit" in p.lower() for p in posted)
 
 
-def test_run_adhoc_token_expired_is_error(tmp_path: Path) -> None:
-    cfg = _cfg(tmp_path)
+def test_run_adhoc_token_expired_is_error(
+    app_cfg: Callable[..., AppConfig],
+) -> None:
+    cfg = app_cfg()
     posted: list[str] = []
 
     def fetch_usage() -> UsageSnapshot:
