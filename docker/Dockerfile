@@ -64,7 +64,9 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/knowl/.venv \
 WORKDIR /opt/knowl
 COPY pyproject.toml uv.lock* README.md /opt/knowl/
 COPY src /opt/knowl/src
-COPY templates /opt/knowl/templates
+# templates は config.yaml の親ディレクトリ基準で resolve されるため、
+# runtime では /etc/knowl/templates (compose の bind mount) から読まれる。
+# image 内には置かない (image に焼くと bind mount 漏れの誤検知を遅らせるだけ)。
 
 RUN uv sync --frozen || uv sync
 

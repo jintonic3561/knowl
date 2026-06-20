@@ -51,4 +51,6 @@ def test_src_bind_mount_present_readonly() -> None:
 
 
 def test_templates_bind_mount_present_readonly() -> None:
-    assert ("../templates", "/opt/knowl/templates", True) in _short_syntax_binds()
+    # templates は config.yaml と同じディレクトリ基準で resolve されるため、
+    # config (/etc/knowl/config.yaml) と sibling な /etc/knowl/templates にマウントする。
+    assert ("../templates", "/etc/knowl/templates", True) in _short_syntax_binds()
