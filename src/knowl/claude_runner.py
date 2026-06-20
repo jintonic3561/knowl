@@ -9,11 +9,11 @@
 from __future__ import annotations
 
 import json
-import subprocess
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from knowl._proc import run_checked
 from knowl.config import ContainerConfig
 from knowl.container import exec_in_container
 
@@ -114,16 +114,13 @@ def run_claude_local(
 ) -> ClaudeResult:
     """本プロジェクトコンテナ(ローカル)で ``claude -p`` を起動する."""
     cmd = _build_argv(prompt, model=model, extra_args=extra_args)
-    try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=timeout,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise ClaudeError(f"claude -p timed out after {timeout}s") from exc
+    result = run_checked(
+        cmd,
+        error_cls=ClaudeError,
+        label=f"claude -p (timeout={timeout}s)",
+        timeout=timeout,
+        check=False,
+    )
     if result.returncode != 0:
         stderr = result.stderr.strip() or result.stdout.strip()
         raise ClaudeError(

@@ -5,6 +5,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
+from knowl.claude_runner import ClaudeError
 from knowl.slack import (
     SlackError,
     SlackNotifier,
@@ -12,6 +13,7 @@ from knowl.slack import (
     build_cycle_summary,
     build_idle_notice,
     build_limit_alert,
+    classify_claude_error,
 )
 
 
@@ -116,3 +118,27 @@ def test_notifier_without_token_skips() -> None:
 def test_notifier_token_without_channel_rejected_at_construction() -> None:
     with pytest.raises(SlackError):
         SlackNotifier(token="tok", channel=None)
+
+
+def test_classify_claude_error_limit_reached() -> None:
+    exc = ClaudeError("weekly limit reached", limit_reached=True)
+    alert = classify_claude_error(
+        exc, notice_prefix="cycle failed during task execution", reason_label="task"
+    )
+    assert alert.limit_reached is True
+    # limit ケースは build_limit_alert を使い、reason は固定文言
+    assert "limit" in alert.notice.lower()
+    assert "weekly limit reached" in alert.notice
+    assert alert.reason == "claude limit reached: weekly limit reached"
+
+
+def test_classify_claude_error_generic() -> None:
+    exc = ClaudeError("something broke")
+    alert = classify_claude_error(
+        exc, notice_prefix="cycle failed during prioritization", reason_label="prioritization"
+    )
+    assert alert.limit_reached is False
+    # 通常エラーは format_error_alert 経由 (knowl prefix 付き)
+    assert "cycle failed during prioritization" in alert.notice
+    assert "something broke" in alert.notice
+    assert alert.reason == "prioritization claude error: something broke"

@@ -40,6 +40,7 @@ def test_default_runner_passes_skip_permissions_flag(
         text: bool,
         check: bool,
         timeout: float | None = None,
+        input: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
         captured.append(list(cmd))
         if list(cmd[:2]) == ["docker", "inspect"]:

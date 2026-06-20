@@ -16,6 +16,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from knowl._proc import run_checked
 from knowl.usage import (
     DEFAULT_CREDENTIALS_PATH,
     OAuthToken,
@@ -48,12 +49,12 @@ def should_refresh(token: OAuthToken, *, now_ms: int, threshold_ms: int) -> bool
 
 
 def _default_runner(argv: Sequence[str], *, timeout_s: float) -> int:
-    proc = subprocess.run(
+    proc = run_checked(
         list(argv),
-        check=False,
+        error_cls=UsageError,
+        label=f"claude keepalive {list(argv)}",
         timeout=timeout_s,
-        capture_output=True,
-        text=True,
+        check=False,
     )
     if proc.stdout:
         _LOG.debug("claude stdout: %s", proc.stdout.strip()[:200])

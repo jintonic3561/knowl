@@ -8,10 +8,10 @@ devcontainer であっても起動済みのコンテナを対象に ``docker exe
 from __future__ import annotations
 
 import shlex
-import subprocess
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
+from knowl._proc import run_checked
 from knowl.config import ContainerConfig
 
 _INSPECT_TIMEOUT = 10.0
@@ -31,20 +31,12 @@ class ContainerExecResult:
 
 
 def _inspect_running(name: str) -> bool:
-    try:
-        result = subprocess.run(
-            ["docker", "inspect", "-f", "{{.State.Running}}", name],
-            capture_output=True,
-            text=True,
-            check=True,
-            timeout=_INSPECT_TIMEOUT,
-        )
-    except subprocess.CalledProcessError as exc:
-        raise ContainerError(
-            f"container {name} not found: {exc.stderr or exc.stdout}"
-        ) from exc
-    except subprocess.TimeoutExpired as exc:
-        raise ContainerError(f"docker inspect timed out for {name}") from exc
+    result = run_checked(
+        ["docker", "inspect", "-f", "{{.State.Running}}", name],
+        error_cls=ContainerError,
+        label=f"docker inspect for {name}",
+        timeout=_INSPECT_TIMEOUT,
+    )
     return result.stdout.strip().lower() == "true"
 
 
@@ -52,20 +44,12 @@ def ensure_running(container: ContainerConfig) -> None:
     """対象コンテナを必要なら起動する."""
     if _inspect_running(container.name):
         return
-    try:
-        subprocess.run(
-            ["docker", "start", container.name],
-            capture_output=True,
-            text=True,
-            check=True,
-            timeout=_START_TIMEOUT,
-        )
-    except subprocess.CalledProcessError as exc:
-        raise ContainerError(
-            f"failed to start container {container.name}: {exc.stderr or exc.stdout}"
-        ) from exc
-    except subprocess.TimeoutExpired as exc:
-        raise ContainerError(f"docker start timed out for {container.name}") from exc
+    run_checked(
+        ["docker", "start", container.name],
+        error_cls=ContainerError,
+        label=f"docker start for {container.name}",
+        timeout=_START_TIMEOUT,
+    )
 
 
 def exec_in_container(
@@ -99,18 +83,13 @@ def exec_in_container(
         cmd.extend(["bash", "-lc", shlex.join(final_argv)])
     else:
         cmd.extend(final_argv)
-    try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=timeout,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise ContainerError(
-            f"docker exec timed out for {container.name}: {' '.join(argv)}"
-        ) from exc
+    result = run_checked(
+        cmd,
+        error_cls=ContainerError,
+        label=f"docker exec for {container.name}: {' '.join(argv)}",
+        timeout=timeout,
+        check=False,
+    )
     return ContainerExecResult(
         returncode=result.returncode,
         stdout=result.stdout,

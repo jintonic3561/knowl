@@ -7,7 +7,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import subprocess
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
@@ -111,3 +113,35 @@ def app_cfg(
 def ok_snapshot() -> UsageSnapshot:
     """ゲートを通る使用量スナップショット (session/weekly 80%残)."""
     return UsageSnapshot(session_remaining_pct=80, weekly_remaining_pct=80)
+
+
+@dataclass
+class FakeProc:
+    """``subprocess.run`` 差し替え用の汎用フェイク.
+
+    ``knowl._proc.run_checked`` 経由 / 直接 ``subprocess.run`` 経由のどちらでも
+    使える。 ``scripted`` キューから順番に ``(rc, stdout, stderr)`` を返し、
+    ``check=True`` で rc != 0 のときは ``CalledProcessError`` を投げる。
+    呼び出された ``cmd`` は ``calls`` に積まれる。
+    """
+
+    scripted: list[tuple[int, str, str]] = field(default_factory=list)
+    calls: list[list[str]] = field(default_factory=list)
+
+    def __call__(
+        self,
+        cmd: Sequence[str],
+        *,
+        capture_output: bool = False,
+        text: bool = False,
+        check: bool = False,
+        timeout: float | None = None,
+        input: str | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        self.calls.append(list(cmd))
+        rc, out, err = self.scripted.pop(0)
+        if check and rc != 0:
+            raise subprocess.CalledProcessError(rc, list(cmd), out, err)
+        return subprocess.CompletedProcess(
+            args=list(cmd), returncode=rc, stdout=out, stderr=err
+        )

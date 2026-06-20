@@ -29,7 +29,7 @@ from knowl.slack import (
     build_cycle_start_notice,
     build_cycle_summary,
     build_idle_notice,
-    build_limit_alert,
+    classify_claude_error,
     format_error_alert,
 )
 from knowl.tasks import TaskExecutionError, TaskOutcome
@@ -150,19 +150,17 @@ def run_cycle(
             executed=False, reason=f"prioritization failed: {exc}", usage=usage
         )
     except ClaudeError as exc:
-        if exc.limit_reached:
-            _LOG.warning("claude limit reached during prioritization: %s", exc)
-            notify(build_limit_alert(str(exc)))
-            return CycleResult(
-                executed=False,
-                reason=f"claude limit reached: {exc}",
-                usage=usage,
-            )
-        _LOG.warning("claude error during prioritization: %s", exc)
-        notify(format_error_alert("cycle failed during prioritization", exc))
-        return CycleResult(
-            executed=False, reason=f"prioritization claude error: {exc}", usage=usage
+        alert = classify_claude_error(
+            exc,
+            notice_prefix="cycle failed during prioritization",
+            reason_label="prioritization",
         )
+        if alert.limit_reached:
+            _LOG.warning("claude limit reached during prioritization: %s", exc)
+        else:
+            _LOG.warning("claude error during prioritization: %s", exc)
+        notify(alert.notice)
+        return CycleResult(executed=False, reason=alert.reason, usage=usage)
 
     if isinstance(prioritized, NoActionableIssue):
         _LOG.info("no actionable issue: %s", prioritized.reason)
@@ -230,21 +228,19 @@ def run_cycle(
     try:
         outcome = run_task(cfg, decision, picked)
     except ClaudeError as exc:
-        if exc.limit_reached:
+        alert = classify_claude_error(
+            exc,
+            notice_prefix="cycle failed during task execution",
+            reason_label="task",
+        )
+        if alert.limit_reached:
             _LOG.warning("claude limit reached: %s", exc)
-            notify(build_limit_alert(str(exc)))
-            return CycleResult(
-                executed=False,
-                reason=f"claude limit reached: {exc}",
-                usage=usage,
-                issue=picked,
-                decision=decision,
-            )
-        _LOG.warning("claude error during task execution: %s", exc)
-        notify(format_error_alert("cycle failed during task execution", exc))
+        else:
+            _LOG.warning("claude error during task execution: %s", exc)
+        notify(alert.notice)
         return CycleResult(
             executed=False,
-            reason=f"task claude error: {exc}",
+            reason=alert.reason,
             usage=usage,
             issue=picked,
             decision=decision,

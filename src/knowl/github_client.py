@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
 from collections.abc import Iterable
 from dataclasses import dataclass
 
+from knowl._proc import run_checked
 from knowl.config import RepoConfig
 
 _JSON_FIELDS = "number,title,body,labels,url,updatedAt,closedByPullRequestsReferences"
@@ -90,20 +90,12 @@ def list_open_issues(
             "--json",
             _JSON_FIELDS,
         ]
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                check=True,
-                timeout=timeout,
-            )
-        except subprocess.CalledProcessError as exc:
-            raise GitHubError(
-                f"gh issue list failed for {repo.name}: {exc.stderr or exc.stdout}"
-            ) from exc
-        except subprocess.TimeoutExpired as exc:
-            raise GitHubError(f"gh issue list timed out for {repo.name}") from exc
+        result = run_checked(
+            cmd,
+            error_cls=GitHubError,
+            label=f"gh issue list for {repo.name}",
+            timeout=timeout,
+        )
         try:
             payload = json.loads(result.stdout or "[]")
         except json.JSONDecodeError as exc:
@@ -142,20 +134,12 @@ def create_issue(
         "--body",
         body,
     ]
-    try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            check=True,
-            timeout=timeout,
-        )
-    except subprocess.CalledProcessError as exc:
-        raise GitHubError(
-            f"gh issue create failed for {repo_name}: {exc.stderr or exc.stdout}"
-        ) from exc
-    except subprocess.TimeoutExpired as exc:
-        raise GitHubError(f"gh issue create timed out for {repo_name}") from exc
+    result = run_checked(
+        cmd,
+        error_cls=GitHubError,
+        label=f"gh issue create for {repo_name}",
+        timeout=timeout,
+    )
     url_match = _ISSUE_URL_RE.search(result.stdout)
     if url_match is None:
         raise GitHubError(
@@ -177,20 +161,12 @@ def create_issue(
 def resolve_gh_login(*, timeout: float = _DEFAULT_TIMEOUT) -> str:
     """``gh api user --jq .login`` で現在のログインユーザ名を取得する."""
     cmd = ["gh", "api", "user", "--jq", ".login"]
-    try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            check=True,
-            timeout=timeout,
-        )
-    except subprocess.CalledProcessError as exc:
-        raise GitHubError(
-            f"gh api user failed: {exc.stderr or exc.stdout}"
-        ) from exc
-    except subprocess.TimeoutExpired as exc:
-        raise GitHubError("gh api user timed out") from exc
+    result = run_checked(
+        cmd,
+        error_cls=GitHubError,
+        label="gh api user",
+        timeout=timeout,
+    )
     login = result.stdout.strip()
     if not login:
         raise GitHubError("gh api user returned empty login")
