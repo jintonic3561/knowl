@@ -24,6 +24,10 @@
 ## 進め方
 
 1. 現状把握: 既存コード・テスト・オリジナル issue ・関連 issue/PR を確認。
+   - **`knowl-reviewed` ラベル付き (人間レビュー後のマージ依頼) のときは、設計・実装には進まず以下のみ実行する**:
+     1. `Closes #{issue_number}` を含む open PR を `gh pr list` で探す。複数あれば PR 番号最大の 1 件を採用 (前回 5b で残した最新 PR を最優先)。 0 件なら issue にマージ対象が無い旨をコメントし、ラベルを `knowl-needs-review` に貼り替えて no-op で終了 (放置するとループする)。
+     2. CI green かつ mergeable なら `--squash --delete-branch` で squash merge し `action: "merged"` で終了。
+     3. CI red / コンフリクト / pending なら、ラベルを `knowl-needs-review` に貼り替え、 PR にブロック理由をコメントして no-op で終了 (同じくループ防止)。
 2. 設計: 最小コスト・保守性重視・必要十分な範囲で方針を決める。範囲拡大は禁止。
 3. 実装 + テスト + レビューループ。
   - 原則 TDD。
@@ -36,7 +40,7 @@
    - **次のいずれか 1 行を明示**:
      - `5a-auto-merge: 自動マージ可` — 自明な変更で、回帰リスク・設計判断ともに最小と確信できる場合のみ。
      - `5b-needs-review: 人間レビュー必要` — 設計判断・ユーザ合意が必要、もしくは判断に迷う場合。理由・選択肢・推奨・レビュー箇所を PR コメントへ。
-6. `5a-auto-merge` の場合、CI が green になり次第 squash merge を実施し、マージ済みリモートブランチを削除する。`5b-needs-review` の場合は PR を残す。ローカルの後始末はいずれの場合も「ブランチ運用」の完了時手順に従う (ここで個別に `git pull` 等は実施しない)。
+6. `5a-auto-merge` の場合、CI が green になり次第 squash merge を実施し、マージ済みリモートブランチを削除する。`5b-needs-review` の場合は **push 直後に `knowl-needs-review` ラベルを issue に付与する** (付け忘れると次サイクルで同じ issue が再抽出されて二重実装になる)。 人間レビュー通過後はユーザが `knowl-reviewed` に貼り替え、次サイクルで上記 1. のマージフローに入る。 ローカルの後始末はいずれの場合も「ブランチ運用」の完了時手順に従う (ここで個別に `git pull` 等は実施しない)。
 7. 後続タスクが必要なら GitHub issue を新規起票し、URL を最終出力に含める。
 
 ## 制約

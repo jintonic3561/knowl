@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from knowl._proc import run_checked
 from knowl.config import RepoConfig
 
-_JSON_FIELDS = "number,title,body,labels,url,updatedAt,closedByPullRequestsReferences"
+_JSON_FIELDS = "number,title,body,labels,url,updatedAt"
 _DEFAULT_TIMEOUT = 30.0
 _ISSUE_URL_RE = re.compile(r"https://github\.com/[^/]+/[^/]+/issues/(\d+)")
 
@@ -32,9 +32,6 @@ class IssueRef:
     labels: tuple[str, ...]
     url: str
     updated_at: str
-    # closing-keyword で紐づく PR の件数。レビュー中 / マージ済の判別は API で
-    # 安定して取れないため、件数のみを保持して「紐づきがあるか否か」のフラグとして使う。
-    linked_pr_count: int = 0
 
 
 def _parse_issue(repo: str, raw: dict[str, object]) -> IssueRef:
@@ -51,11 +48,6 @@ def _parse_issue(repo: str, raw: dict[str, object]) -> IssueRef:
         number = int(number_raw)
     except ValueError as exc:
         raise GitHubError(f"non-numeric issue number for {repo}: {number_raw!r}") from exc
-    linked_prs_raw = raw.get("closedByPullRequestsReferences") or []
-    if not isinstance(linked_prs_raw, list):
-        raise GitHubError(
-            f"unexpected closedByPullRequestsReferences shape for {repo}#{number}"
-        )
     return IssueRef(
         repo=repo,
         number=number,
@@ -64,7 +56,6 @@ def _parse_issue(repo: str, raw: dict[str, object]) -> IssueRef:
         labels=labels,
         url=str(raw.get("url") or ""),
         updated_at=str(raw.get("updatedAt") or ""),
-        linked_pr_count=len(linked_prs_raw),
     )
 
 
