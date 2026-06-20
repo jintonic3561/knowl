@@ -30,6 +30,7 @@ from knowl.slack import (
     build_cycle_summary,
     build_idle_notice,
     build_limit_alert,
+    format_error_alert,
 )
 from knowl.tasks import TaskExecutionError, TaskOutcome
 from knowl.usage import TokenExpiredError, UsageError, UsageSnapshot
@@ -71,11 +72,6 @@ class CycleResult:
     decision: PriorityDecision | None = None
 
 
-def _build_error_alert(prefix: str, exc: BaseException) -> str:
-    """サイクル失敗時の Slack 通知文."""
-    return f"❌ knowl cycle failed during {prefix}: {exc}"
-
-
 def run_cycle(
     cfg: AppConfig,
     *,
@@ -106,7 +102,7 @@ def run_cycle(
         return CycleResult(executed=False, reason=f"oauth token expired: {exc}")
     except UsageError as exc:
         _LOG.warning("usage fetch failed: %s", exc)
-        notify(_build_error_alert("usage fetch", exc))
+        notify(format_error_alert("cycle failed during usage fetch", exc))
         return CycleResult(executed=False, reason=f"usage fetch failed: {exc}")
 
     decision_gate = evaluate_gate(
@@ -122,7 +118,7 @@ def run_cycle(
         issues = list_issues(cfg.repositories)
     except GitHubError as exc:
         _LOG.warning("issue collection failed: %s", exc)
-        notify(_build_error_alert("issue collection", exc))
+        notify(format_error_alert("cycle failed during issue collection", exc))
         return CycleResult(
             executed=False, reason=f"issue collection failed: {exc}", usage=usage
         )
@@ -149,7 +145,7 @@ def run_cycle(
         prioritized = prioritize(candidates, model=cfg.model)
     except PrioritizationError as exc:
         _LOG.warning("prioritization failed: %s", exc)
-        notify(_build_error_alert("prioritization", exc))
+        notify(format_error_alert("cycle failed during prioritization", exc))
         return CycleResult(
             executed=False, reason=f"prioritization failed: {exc}", usage=usage
         )
@@ -163,7 +159,7 @@ def run_cycle(
                 usage=usage,
             )
         _LOG.warning("claude error during prioritization: %s", exc)
-        notify(_build_error_alert("prioritization", exc))
+        notify(format_error_alert("cycle failed during prioritization", exc))
         return CycleResult(
             executed=False, reason=f"prioritization claude error: {exc}", usage=usage
         )
@@ -214,7 +210,7 @@ def run_cycle(
         ensure_container(repo.container)
     except ContainerError as exc:
         _LOG.warning("container start failed: %s", exc)
-        notify(_build_error_alert("container start", exc))
+        notify(format_error_alert("cycle failed during container start", exc))
         return CycleResult(
             executed=False,
             reason=f"container start failed: {exc}",
@@ -245,7 +241,7 @@ def run_cycle(
                 decision=decision,
             )
         _LOG.warning("claude error during task execution: %s", exc)
-        notify(_build_error_alert("task execution", exc))
+        notify(format_error_alert("cycle failed during task execution", exc))
         return CycleResult(
             executed=False,
             reason=f"task claude error: {exc}",
@@ -255,7 +251,7 @@ def run_cycle(
         )
     except TaskExecutionError as exc:
         _LOG.warning("task execution failed: %s", exc)
-        notify(_build_error_alert("task execution", exc))
+        notify(format_error_alert("cycle failed during task execution", exc))
         return CycleResult(
             executed=False,
             reason=f"task execution failed: {exc}",
@@ -265,7 +261,7 @@ def run_cycle(
         )
     except ContainerError as exc:
         _LOG.warning("container operation failed: %s", exc)
-        notify(_build_error_alert("container", exc))
+        notify(format_error_alert("cycle failed during container", exc))
         return CycleResult(
             executed=False,
             reason=f"container operation failed: {exc}",

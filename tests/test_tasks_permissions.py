@@ -3,51 +3,30 @@
 from __future__ import annotations
 
 import subprocess
-from collections.abc import Sequence
-from pathlib import Path
+from collections.abc import Callable, Sequence
 
 import pytest
 
-from knowl.config import AppConfig, RepoConfig, TemplatesConfig
+from knowl.config import AppConfig, RepoConfig
 from knowl.github_client import IssueRef
 from knowl.prioritize import PriorityDecision, TaskKind
 from knowl.tasks import DEFAULT_RUN_EXTRA_ARGS, run_task
 
 
-def repo() -> RepoConfig:
-    return RepoConfig.model_validate(
-        {"name": "acme/widgets", "container": {"kind": "docker", "name": "widgets-dev"}}
-    )
-
-
-def issue() -> IssueRef:
-    return IssueRef(
-        repo="acme/widgets",
-        number=1,
-        title="t",
-        body="b",
-        labels=(),
-        url="https://x",
-        updated_at="t",
-    )
-
-
-def app_cfg(tmp_path: Path) -> AppConfig:
-    impl = tmp_path / "i.md"
-    inv = tmp_path / "v.md"
-    impl.write_text("p", encoding="utf-8")
-    inv.write_text("p", encoding="utf-8")
-    return AppConfig(
-        templates=TemplatesConfig(implementation=impl, investigation=inv),
-        repositories=[repo()],
-    )
+@pytest.fixture
+def permissions_cfg(
+    app_cfg: Callable[..., AppConfig],
+    make_repo: Callable[..., RepoConfig],
+) -> AppConfig:
+    return app_cfg(repos=[make_repo(container_name="widgets-dev")])
 
 
 def test_default_runner_passes_skip_permissions_flag(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    permissions_cfg: AppConfig,
+    make_issue: Callable[..., IssueRef],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """default runner は --dangerously-skip-permissions を渡す."""
-    cfg = app_cfg(tmp_path)
     decision = PriorityDecision(
         repo="acme/widgets", number=1, kind=TaskKind.IMPLEMENTATION, reason=""
     )
@@ -81,7 +60,9 @@ def test_default_runner_passes_skip_permissions_flag(
 
     monkeypatch.setattr(subprocess, "run", fake_run)
 
-    outcome = run_task(cfg, decision, issue())
+    outcome = run_task(
+        permissions_cfg, decision, make_issue(url="https://x", updated_at="t")
+    )
     assert outcome.action == "pr-opened"
 
     # 2 回目の docker exec 呼び出しに permission フラグが含まれているか

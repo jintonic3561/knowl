@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 import sys
@@ -27,6 +26,7 @@ from knowl.keepalive import DEFAULT_THRESHOLD_MS, DEFAULT_TIMEOUT_S, keepalive_o
 from knowl.prioritize import NoActionableIssue, PriorityDecision, pick_priority
 from knowl.slack import SlackNotifier
 from knowl.slack_bot import run_bot_forever
+from knowl.state import idle_state_path, load_last_idle, save_last_idle
 from knowl.tasks import TaskOutcome
 from knowl.tasks import run_task as run_task_impl
 from knowl.usage import (
@@ -38,36 +38,6 @@ from knowl.usage import (
 )
 
 _LOG = logging.getLogger("knowl")
-
-DEFAULT_STATE_DIR = Path("/var/lib/knowl")
-IDLE_STATE_FILENAME = "idle_state.json"
-
-
-def _idle_state_path() -> Path:
-    """前回 idle フラグを保存するパスを返す."""
-    base = os.environ.get("KNOWL_STATE_DIR")
-    return (Path(base) if base else DEFAULT_STATE_DIR) / IDLE_STATE_FILENAME
-
-
-def _load_last_idle(path: Path) -> bool:
-    """前回サイクルが idle だったかをロード。読み取れない場合は False."""
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return False
-    except (OSError, json.JSONDecodeError) as exc:
-        _LOG.warning("idle state load failed (treating as not-idle): %s", exc)
-        return False
-    return bool(data.get("last_idle", False)) if isinstance(data, dict) else False
-
-
-def _save_last_idle(path: Path, value: bool) -> None:
-    """idle フラグを保存。失敗してもサイクル全体は止めない."""
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"last_idle": value}), encoding="utf-8")
-    except OSError as exc:
-        _LOG.warning("idle state save failed: %s", exc)
 
 
 def _setup_logging(verbose: bool) -> None:
@@ -166,8 +136,8 @@ def run_once(config_path: Path, credentials_path: Path | None) -> None:
             _LOG.warning("slack notification failed: %s", exc)
         click.echo(text)
 
-    state_path = _idle_state_path()
-    suppress_idle_notice = _load_last_idle(state_path)
+    state_path = idle_state_path()
+    suppress_idle_notice = load_last_idle(state_path)
 
     result: CycleResult = run_cycle(
         cfg,
@@ -185,9 +155,9 @@ def run_once(config_path: Path, credentials_path: Path | None) -> None:
     # - idle=True: 進捗なし → 連続なら次回抑止 (True)
     # - それ以外 (gate block / error / limit reached): 前回値を維持
     if result.executed:
-        _save_last_idle(state_path, False)
+        save_last_idle(state_path, False)
     elif result.idle:
-        _save_last_idle(state_path, True)
+        save_last_idle(state_path, True)
 
     if not result.executed:
         click.echo(f"no-op: {result.reason}")
