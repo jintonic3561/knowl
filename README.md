@@ -30,6 +30,7 @@ $EDITOR knowl.yaml
 cat > .env <<'EOF'
 GH_TOKEN="ghp_..."
 SLACK_BOT_TOKEN="xoxb-..."
+SLACK_AOO_TOKEN="..."
 SLACK_CHANNEL="#通知したいチャンネル"
 # Slack slash command `/knowl` を使う場合のみ (詳細は後述)
 SLACK_APP_TOKEN="xapp-..."
@@ -48,15 +49,15 @@ make logs
 `make` か `make help` でターゲット一覧を確認できる。中身は `docker compose -f docker/docker-compose.yml ...` の薄いラッパなので、素の docker compose を直接使っても同等に動く。
 
 cron は `cron_interval_minutes` 設定 (デフォルト 60 分) に従って `knowl run-once` を起動する。ゲート判定で余裕がなければ no-op で次回まで待機する。
+make start 時は起動直後に 1 サイクル動く。
 
 タスクタイプ (実装 / 調査) は issue に専用ラベルを付けると Claude を介さず決定する。`knowl-implementation` / `knowl-investigation` のどちらか一方を付けるとそのタイプで実行される。両方付いている / どちらも無い場合は従来通り Claude 判定にフォールバックする。各リポジトリで `gh label create knowl-implementation` / `gh label create knowl-investigation` で作成しておく。
 
-make start 時は起動直後に 1 サイクル動く。
 
 Knowl 自身のリポジトリで PR がオートマージされた場合の伝播は次の 2 経路:
 
-- **ソース・テンプレート変更** (`src/`, `templates/`): `docker/docker-compose.yml` で host 側ディレクトリを runtime コンテナへ `:ro` で bind mount している。Claude は knowl 自身の PR を解決する際 `knowl-dev` devcontainer (host の repo を mount している) 内で作業するため、テンプレ規約の「ローカル main を pull」を実行するだけで host 側 working tree も同期され、次の cron tick から自動で新コードが走る。手動操作は不要。`git pull` は瞬時ではないので稀に部分更新状態で cron tick とぶつかってサイクルが失敗することがあるが、`run-cycle.sh` の flock と次 tick の再実行で自然復帰する。Claude を介さず手動で main をマージした場合は、host の repo を手で `git pull` するか `make deploy` を叩く必要がある。
-- **依存追加 / entry-point 追加など `.venv` 再生成が必要な変更**: `make deploy` で image を rebuild + 再起動する。`make deploy` は `KNOWL_SKIP_INITIAL_RUN=1` 付きで `up -d --build` するだけで、起動直後の即時 1 サイクルをスキップする (直前サイクルの完了とほぼ同時にもう 1 サイクル走らせると、二重実行 (`run-cycle.sh` 内 flock で skip はされるが、Slack 通知やログが乱れる) のリスクがあるため)。
+- ソース・テンプレート変更: 次回実行から自動適用。 
+- 依存追加 / entry-point 追加など `.venv` 再生成が必要な変更: `make deploy` による image の rebuild + 再起動が必要。
 
 ### Slack slash command `/knowl` から ad-hoc 起動
 
@@ -69,15 +70,9 @@ cron 周期を待たずに「今これやって」を投げたいとき用。常
 例:
 
 - `/knowl run knowl Slack bot 機能のテストを追加`
-- `/knowl run jintonic3561/some-repo README に使用例セクション追加`
+- `/knowl run owner/some-repo README に使用例セクション追加`
 
 `<repo>` を `name` のみで書いた場合、bot は `gh api user --jq .login` で取得したログインユーザ名で `owner/name` に補完する。受け付けた指示はその場で対象 repo に seed issue として起票され、通常の実装パイプラインに流れて PR まで作る。
-
-挙動:
-
-1. `ack()` 即時 (Slack の 3 秒タイムアウト対策) → 「了解」と返事
-2. バックグラウンドでゲート判定 → 通らなければ「rate limit きつくて無理だったすまん」と追加返事
-3. ゲート通過時はそのまま seed issue 起票 → 既存パイプラインで実装。タスク開始 / 完了通知は既存の Slack 通知に統合されるため二重通知にならない
 
 #### Slack App セットアップ手順
 
@@ -101,8 +96,6 @@ make keepalive-now      # 即時実行 (cron を待たない動作確認)
 make keepalive-logs     # .logs/keepalive.log を tail
 make keepalive-stop     # 登録解除
 ```
-
-中身は `scripts/keepalive.sh` → `uv run knowl keepalive`。`~/.claude/.credentials.json` の `expiresAt` を見て、残り寿命が閾値 (デフォルト 2h) を切ったときだけ `claude -p ok` を叩く。これにより Claude Code CLI が refreshToken で access token を更新し、ファイルが書き換わる。コンテナ側は `~/.claude` を ro bind mount しているのでそのまま新しいトークンを読む (再ビルド・再起動不要)。
 
 - refresh が走るのは閾値割れ時だけなので、API 消費は 1 日数回 (~$0.1 オーダ)。
 - 周期や閾値は上書き可: `make keepalive-start KEEPALIVE_CRON='*/15 * * * *'`、`scripts/keepalive.sh --threshold-hours 1`。
