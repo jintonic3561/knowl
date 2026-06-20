@@ -606,6 +606,88 @@ def test_run_cycle_handles_limit_alert(
     assert any("limit" in p.lower() for p in posted)
 
 
+def test_run_cycle_escalates_to_limit_when_claude_error_carries_drained_usage(
+    app_cfg: Callable[..., AppConfig],
+    make_issue: Callable[..., IssueRef],
+    ok_snapshot: UsageSnapshot,
+) -> None:
+    """stderr ヒントが無くても、 ClaudeError に添えた snapshot が閾値割れなら limit alert に昇格.
+
+    gate 通過後に Claude 実行中で 5h ウィンドウを使い切るレースを想定。 run_task 側で
+    枯渇 snapshot を ClaudeError に添えて投げると、 cycle.py の except 分岐で
+    ``escalate_limit_reached`` が ``limit_reached=True`` に昇格させる。
+    """
+    cfg = app_cfg()
+    posted: list[str] = []
+    drained = UsageSnapshot(session_remaining_pct=2, weekly_remaining_pct=80)
+
+    def run_task(
+        cfg: AppConfig, decision: PriorityDecision, issue: IssueRef
+    ) -> TaskOutcome:
+        raise ClaudeError("claude -p exited 1: internal error", usage=drained)
+
+    result = run_cycle(
+        cfg,
+        fetch_usage=lambda: ok_snapshot,
+        list_issues=lambda repos: [make_issue()],
+        prioritize=lambda issues, **_: (
+            PriorityDecision(
+                repo="acme/widgets", number=1, kind=TaskKind.IMPLEMENTATION, reason=""
+            ),
+            issues[0],
+        ),
+        run_task=run_task,
+        notify=posted.append,
+        ensure_container=lambda _: None,
+    )
+
+    assert result.executed is False
+    assert "limit" in result.reason.lower()
+    assert any("limit" in p.lower() for p in posted)
+
+
+def test_run_cycle_keeps_generic_error_when_usage_within_threshold(
+    app_cfg: Callable[..., AppConfig],
+    make_issue: Callable[..., IssueRef],
+    ok_snapshot: UsageSnapshot,
+) -> None:
+    """stderr ヒント無し + 通常レンジ snapshot は通常エラー扱いのまま (誤判定しない)."""
+    cfg = app_cfg()
+    posted: list[str] = []
+
+    def run_task(
+        cfg: AppConfig, decision: PriorityDecision, issue: IssueRef
+    ) -> TaskOutcome:
+        # usage を添えても残量十分なら escalation は発火しない。
+        raise ClaudeError(
+            "claude -p exited 1: internal error",
+            usage=UsageSnapshot(session_remaining_pct=80, weekly_remaining_pct=80),
+        )
+
+    result = run_cycle(
+        cfg,
+        fetch_usage=lambda: ok_snapshot,
+        list_issues=lambda repos: [make_issue()],
+        prioritize=lambda issues, **_: (
+            PriorityDecision(
+                repo="acme/widgets", number=1, kind=TaskKind.IMPLEMENTATION, reason=""
+            ),
+            issues[0],
+        ),
+        run_task=run_task,
+        notify=posted.append,
+        ensure_container=lambda _: None,
+    )
+
+    assert result.executed is False
+    # 通常の claude error 扱い (limit ではない)
+    assert "claude error" in result.reason
+    assert "limit reached" not in result.reason
+    # 通知も限度エラーではなく一般エラー alert
+    assert any("❌" in p for p in posted)
+    assert not any("limit" in p.lower() for p in posted)
+
+
 def test_run_cycle_usage_error_notifies(
     app_cfg: Callable[..., AppConfig],
     make_issue: Callable[..., IssueRef],

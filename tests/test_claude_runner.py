@@ -11,9 +11,11 @@ import pytest
 from knowl.claude_runner import (
     ClaudeError,
     ClaudeResult,
+    escalate_limit_reached,
     extract_text,
     run_claude_local,
 )
+from knowl.usage import UsageSnapshot
 
 
 def _ok(payload: dict[str, object]) -> subprocess.CompletedProcess[str]:
@@ -130,3 +132,65 @@ def test_run_claude_local_detects_limit_reached(monkeypatch: pytest.MonkeyPatch)
     with pytest.raises(ClaudeError) as exc:
         run_claude_local("hi")
     assert exc.value.limit_reached is True
+    # snapshot は明示されていなければ None。
+    assert exc.value.usage is None
+
+
+def test_claude_error_accepts_usage_snapshot() -> None:
+    snap = UsageSnapshot(session_remaining_pct=20, weekly_remaining_pct=80)
+    exc = ClaudeError("boom", usage=snap)
+    assert exc.usage is snap
+    # 明示されない限り limit_reached は変わらない (escalation は別関数の責務)。
+    assert exc.limit_reached is False
+
+
+def test_escalate_limit_reached_keeps_false_for_healthy_usage() -> None:
+    """通常レンジの usage では stderr ヒント無しの ClaudeError をそのまま扱う."""
+    snap = UsageSnapshot(session_remaining_pct=80, weekly_remaining_pct=80)
+    exc = ClaudeError("internal error")
+    escalate_limit_reached(exc, snap, session_threshold=30, weekly_threshold=10)
+    assert exc.limit_reached is False
+    assert exc.usage is snap
+
+
+def test_escalate_limit_reached_keeps_false_just_above_threshold() -> None:
+    """閾値ちょうど (= gate 通過ライン) では limit 扱いしない."""
+    snap = UsageSnapshot(session_remaining_pct=30, weekly_remaining_pct=10)
+    exc = ClaudeError("internal error")
+    escalate_limit_reached(exc, snap, session_threshold=30, weekly_threshold=10)
+    assert exc.limit_reached is False
+
+
+def test_escalate_limit_reached_promotes_when_session_below_threshold() -> None:
+    """5h 残量が閾値割れなら stderr ヒント無しでも limit_reached=True に昇格."""
+    snap = UsageSnapshot(session_remaining_pct=5, weekly_remaining_pct=80)
+    exc = ClaudeError("internal error")
+    escalate_limit_reached(exc, snap, session_threshold=30, weekly_threshold=10)
+    assert exc.limit_reached is True
+    assert exc.usage is snap
+
+
+def test_escalate_limit_reached_promotes_when_weekly_below_threshold() -> None:
+    """週次残量が閾値割れでも limit_reached=True に昇格."""
+    snap = UsageSnapshot(session_remaining_pct=80, weekly_remaining_pct=2)
+    exc = ClaudeError("internal error")
+    escalate_limit_reached(exc, snap, session_threshold=30, weekly_threshold=10)
+    assert exc.limit_reached is True
+
+
+def test_escalate_limit_reached_preserves_existing_true() -> None:
+    """既に limit_reached=True なら usage を後付けしても True のまま."""
+    snap = UsageSnapshot(session_remaining_pct=80, weekly_remaining_pct=80)
+    exc = ClaudeError("usage limit reached", limit_reached=True)
+    escalate_limit_reached(exc, snap, session_threshold=30, weekly_threshold=10)
+    assert exc.limit_reached is True
+    assert exc.usage is snap
+
+
+def test_escalate_limit_reached_does_not_overwrite_existing_usage() -> None:
+    """既に usage が添えられていれば後付け snapshot で上書きしない."""
+    initial = UsageSnapshot(session_remaining_pct=5, weekly_remaining_pct=80)
+    later = UsageSnapshot(session_remaining_pct=80, weekly_remaining_pct=80)
+    exc = ClaudeError("boom", usage=initial)
+    escalate_limit_reached(exc, later, session_threshold=30, weekly_threshold=10)
+    assert exc.usage is initial

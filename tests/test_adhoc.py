@@ -262,6 +262,39 @@ def test_run_adhoc_task_limit_reached(
     assert any("limit" in p.lower() for p in posted)
 
 
+def test_run_adhoc_escalates_to_limit_when_claude_error_carries_drained_usage(
+    app_cfg: Callable[..., AppConfig],
+    make_issue: Callable[..., IssueRef],
+    ok_snapshot: UsageSnapshot,
+) -> None:
+    """ad-hoc 経路でも stderr ヒント無し + usage 枯渇で limit alert に昇格."""
+    from knowl.claude_runner import ClaudeError
+
+    cfg = app_cfg()
+    posted: list[str] = []
+    drained = UsageSnapshot(session_remaining_pct=80, weekly_remaining_pct=2)
+
+    def run_task(*a: object, **kw: object) -> TaskOutcome:
+        raise ClaudeError("internal error", usage=drained)
+
+    result = run_adhoc(
+        cfg,
+        repo_name="acme/widgets",
+        task_description="task",
+        user="alice",
+        fetch_usage=lambda: ok_snapshot,
+        create_issue=lambda *a, **kw: _make_seed(make_issue),
+        ensure_container=lambda _: None,
+        run_task=run_task,
+        notify=posted.append,
+        acquire_lock=_no_lock,
+    )
+
+    assert result.kind is AdhocResultKind.ERROR
+    assert "limit" in result.reason.lower()
+    assert any("limit" in p.lower() for p in posted)
+
+
 def test_run_adhoc_token_expired_is_error(
     app_cfg: Callable[..., AppConfig],
 ) -> None:
