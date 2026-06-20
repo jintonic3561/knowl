@@ -16,6 +16,8 @@ from typing import Any
 
 from knowl.config import ContainerConfig
 from knowl.container import exec_in_container
+from knowl.gate import evaluate_gate
+from knowl.usage import UsageSnapshot
 
 DEFAULT_MODEL = "claude-opus-4-7"
 DEFAULT_TIMEOUT = 60.0 * 60.0 * 2.0  # 2h
@@ -24,9 +26,19 @@ DEFAULT_TIMEOUT = 60.0 * 60.0 * 2.0  # 2h
 class ClaudeError(RuntimeError):
     """claude CLI 起動またはレスポンス解釈失敗."""
 
-    def __init__(self, message: str, *, limit_reached: bool = False) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        limit_reached: bool = False,
+        usage: UsageSnapshot | None = None,
+    ) -> None:
         super().__init__(message)
         self.limit_reached = limit_reached
+        # ClaudeError 発生時点の usage snapshot を任意で添える。 stderr の文言マッチが
+        # 外れた (= ``_LIMIT_HINTS`` が CLI 仕様変更で当たらなくなった) 場合の保険として、
+        # 呼び出し側が ``escalate_limit_reached`` で残量を再判定するために使う。
+        self.usage: UsageSnapshot | None = usage
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +60,41 @@ _LIMIT_HINTS = (
 def _looks_like_limit(message: str) -> bool:
     lowered = message.lower()
     return any(hint in lowered for hint in _LIMIT_HINTS)
+
+
+def escalate_limit_reached(
+    exc: ClaudeError,
+    snapshot: UsageSnapshot,
+    *,
+    session_threshold: float,
+    weekly_threshold: float,
+) -> None:
+    """``ClaudeError`` の ``limit_reached`` を usage snapshot で補強する.
+
+    ``_LIMIT_HINTS`` は CLI stderr の文言ハードコードに依存しており、文言が変わると
+    ``limit_reached=False`` のまま次サイクルでも同じエラーで no-op が続くリスクがある。
+    その保険として、 5h / 週次のいずれかの残量が閾値割れであれば ``limit_reached=True``
+    に昇格させ、 cycle/adhoc 側で limit alert として扱えるようにする。
+
+    - ``exc.usage`` が未設定なら ``snapshot`` を後付けする。 既に添えられている場合
+      (将来 ``run_task`` 等が Claude 実行直前/直後に取り直した最新 snapshot を
+      ``ClaudeError(..., usage=...)`` に詰める経路を想定) はそちらを尊重する。
+      現 PR ではその経路はまだ無く、 cycle/adhoc 冒頭の snapshot が常に渡る。
+    - 既に ``limit_reached=True`` (stderr ヒントマッチで判定済み) なら何もしない。
+    - 閾値判定は ``gate.evaluate_gate`` を再利用するので、 gate ロジックを変えれば
+      escalation 側も自動追随する。 閾値ちょうど (= gate 通過ライン) は False のまま。
+    """
+    if exc.usage is None:
+        exc.usage = snapshot
+    if exc.limit_reached:
+        return
+    decision = evaluate_gate(
+        exc.usage,
+        session_threshold=session_threshold,
+        weekly_threshold=weekly_threshold,
+    )
+    if not decision.allowed:
+        exc.limit_reached = True
 
 
 def extract_text(payload: dict[str, Any]) -> str:

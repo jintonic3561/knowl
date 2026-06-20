@@ -14,7 +14,7 @@ from enum import StrEnum
 from typing import Protocol
 
 from knowl._lock import cycle_lock
-from knowl.claude_runner import ClaudeError
+from knowl.claude_runner import ClaudeError, escalate_limit_reached
 from knowl.config import AppConfig, RepoConfig
 from knowl.container import ContainerError
 from knowl.cycle import EnsureContainer, FetchUsage, Notify, RunTask
@@ -215,6 +215,12 @@ def _run_locked(
     try:
         outcome = run_task(cfg, decision, issue)
     except ClaudeError as exc:
+        escalate_limit_reached(
+            exc,
+            usage,
+            session_threshold=cfg.thresholds.session_remaining_pct,
+            weekly_threshold=cfg.thresholds.weekly_remaining_pct,
+        )
         if exc.limit_reached:
             notify(build_limit_alert(str(exc)))
             return AdhocResult(
