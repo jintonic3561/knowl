@@ -31,3 +31,9 @@ services:
       # 依存追加・entry-point 追加など .venv 再生成が必要な変更は引き続き `make deploy` で rebuild。
       - ../src:/opt/knowl/src:ro
       - ../templates:/opt/knowl/templates:ro
+      # idle 連続抑止用の状態ファイル。コンテナ再起動 / `make deploy` を跨いでも
+      # 残るよう named volume を割り当てる (なくすと毎再起動で idle 通知が 1 回飛ぶ)。
+      - knowl-state:/var/lib/knowl
+
+volumes:
+  knowl-state:
