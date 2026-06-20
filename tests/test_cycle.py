@@ -203,13 +203,13 @@ def test_run_cycle_no_op_when_all_issues_blocked(
     make_issue: Callable[..., IssueRef],
     ok_snapshot: UsageSnapshot,
 ) -> None:
-    from knowl.filters import INVESTIGATED_LABEL
+    from knowl.filters import INVESTIGATED_LABEL, NEEDS_REVIEW_LABEL
 
     cfg = app_cfg()
     posted: list[str] = []
 
     blocked_issues = [
-        make_issue(number=1, linked_pr_count=1),
+        make_issue(number=1, labels=(NEEDS_REVIEW_LABEL,)),
         make_issue(number=2, labels=(INVESTIGATED_LABEL,)),
     ]
 
@@ -239,14 +239,14 @@ def test_run_cycle_filters_blocked_before_prioritize(
     make_issue: Callable[..., IssueRef],
     ok_snapshot: UsageSnapshot,
 ) -> None:
-    from knowl.filters import INVESTIGATED_LABEL
+    from knowl.filters import INVESTIGATED_LABEL, NEEDS_REVIEW_LABEL
 
     cfg = app_cfg()
     posted: list[str] = []
 
     actionable = make_issue(number=1)
     issues = [
-        make_issue(number=2, linked_pr_count=1),
+        make_issue(number=2, labels=(NEEDS_REVIEW_LABEL,)),
         actionable,
         make_issue(number=3, labels=(INVESTIGATED_LABEL,)),
     ]
@@ -288,6 +288,59 @@ def test_run_cycle_filters_blocked_before_prioritize(
     )
     assert result.executed is True
     assert result.issue is actionable
+
+
+def test_run_cycle_short_circuits_for_reviewed_label(
+    app_cfg: Callable[..., AppConfig],
+    make_issue: Callable[..., IssueRef],
+    ok_snapshot: UsageSnapshot,
+) -> None:
+    """``knowl-reviewed`` 付き issue は prioritize をスキップし IMPLEMENTATION で直接実行."""
+    from knowl.filters import REVIEWED_LABEL
+    from knowl.prioritize import INVESTIGATION_LABEL
+
+    cfg = app_cfg()
+    posted: list[str] = []
+    other = make_issue(number=1, title="other")
+    # reviewed と investigation ラベルが併存しても reviewed の短絡 (IMPLEMENTATION) が
+    # 後段の label kind 上書きで覆されないこと。
+    reviewed = make_issue(
+        number=2, title="ready", labels=(REVIEWED_LABEL, INVESTIGATION_LABEL)
+    )
+
+    def prioritize(
+        issues: list[IssueRef], *, model: str
+    ) -> tuple[PriorityDecision, IssueRef]:  # pragma: no cover
+        pytest.fail("prioritize must not be invoked when knowl-reviewed exists")
+
+    received: list[PriorityDecision] = []
+
+    def run_task(
+        cfg: AppConfig, decision: PriorityDecision, issue: IssueRef
+    ) -> TaskOutcome:
+        received.append(decision)
+        return TaskOutcome(
+            kind=decision.kind,
+            action="merged",
+            summary="merged existing pr",
+            url="https://pr/2",
+            followups=[],
+        )
+
+    result = run_cycle(
+        cfg,
+        fetch_usage=lambda: ok_snapshot,
+        list_issues=lambda repos: [other, reviewed],
+        prioritize=prioritize,
+        run_task=run_task,
+        notify=posted.append,
+        ensure_container=lambda _: None,
+    )
+
+    assert result.executed is True
+    assert result.issue is reviewed
+    assert received and received[0].kind is TaskKind.IMPLEMENTATION
+    assert received[0].number == 2
 
 
 def test_run_cycle_no_op_when_no_actionable_issue(

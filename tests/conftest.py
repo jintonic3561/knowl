@@ -53,7 +53,6 @@ def make_issue() -> Callable[..., IssueRef]:
         labels: tuple[str, ...] = (),
         url: str | None = None,
         updated_at: str = "2026-06-01T00:00:00Z",
-        linked_pr_count: int = 0,
     ) -> IssueRef:
         return IssueRef(
             repo=repo,
@@ -63,7 +62,6 @@ def make_issue() -> Callable[..., IssueRef]:
             labels=labels,
             url=url if url is not None else f"https://github.com/{repo}/issues/{number}",
             updated_at=updated_at,
-            linked_pr_count=linked_pr_count,
         )
 
     return _make

@@ -14,7 +14,7 @@ from typing import Protocol
 from knowl.claude_runner import ClaudeError, escalate_limit_reached
 from knowl.config import AppConfig, ContainerConfig, RepoConfig
 from knowl.container import ContainerError
-from knowl.filters import exclude_blocked_issues
+from knowl.filters import REVIEWED_LABEL, exclude_blocked_issues
 from knowl.gate import evaluate_gate
 from knowl.github_client import GitHubError, IssueRef
 from knowl.prioritize import (
@@ -23,6 +23,7 @@ from knowl.prioritize import (
     NoActionableIssue,
     PrioritizationError,
     PriorityDecision,
+    TaskKind,
     task_kind_from_labels,
 )
 from knowl.slack import (
@@ -131,7 +132,7 @@ def run_cycle(
 
     candidates = exclude_blocked_issues(issues)
     if not candidates:
-        reason = "open issue は全て PR レビュー中 / 調査完了済み"
+        reason = "open issue は全てレビュー中 / 調査完了済み"
         _LOG.info("all open issues blocked: %s", reason)
         notify_idle(reason)
         return CycleResult(
@@ -141,32 +142,52 @@ def run_cycle(
             usage=usage,
         )
 
-    try:
-        prioritized = prioritize(candidates, model=cfg.model)
-    except PrioritizationError as exc:
-        _LOG.warning("prioritization failed: %s", exc)
-        notify(format_error_alert("cycle failed during prioritization", exc))
-        return CycleResult(
-            executed=False, reason=f"prioritization failed: {exc}", usage=usage
+    # `knowl-reviewed` 付き issue は人間レビュー通過後にユーザが付与したもの。
+    # 既存 PR をマージするだけで完了するため、 Claude prioritize をスキップし
+    # IMPLEMENTATION として直接実行する (テンプレ側がマージ処理を担当)。
+    reviewed = next((i for i in candidates if REVIEWED_LABEL in i.labels), None)
+    if reviewed is not None:
+        prioritized: tuple[PriorityDecision, IssueRef] | NoActionableIssue = (
+            PriorityDecision(
+                repo=reviewed.repo,
+                number=reviewed.number,
+                kind=TaskKind.IMPLEMENTATION,
+                reason=f"{REVIEWED_LABEL} ラベル付き — 既存 PR のマージ処理を優先",
+            ),
+            reviewed,
         )
-    except ClaudeError as exc:
-        escalate_limit_reached(
-            exc,
-            usage,
-            session_threshold=cfg.thresholds.session_remaining_pct,
-            weekly_threshold=cfg.thresholds.weekly_remaining_pct,
+        _LOG.info(
+            "short-circuiting prioritize for reviewed issue %s#%d",
+            reviewed.repo,
+            reviewed.number,
         )
-        alert = classify_claude_error(
-            exc,
-            notice_prefix="cycle failed during prioritization",
-            reason_label="prioritization",
-        )
-        if alert.limit_reached:
-            _LOG.warning("claude limit reached during prioritization: %s", exc)
-        else:
-            _LOG.warning("claude error during prioritization: %s", exc)
-        notify(alert.notice)
-        return CycleResult(executed=False, reason=alert.reason, usage=usage)
+    else:
+        try:
+            prioritized = prioritize(candidates, model=cfg.model)
+        except PrioritizationError as exc:
+            _LOG.warning("prioritization failed: %s", exc)
+            notify(format_error_alert("cycle failed during prioritization", exc))
+            return CycleResult(
+                executed=False, reason=f"prioritization failed: {exc}", usage=usage
+            )
+        except ClaudeError as exc:
+            escalate_limit_reached(
+                exc,
+                usage,
+                session_threshold=cfg.thresholds.session_remaining_pct,
+                weekly_threshold=cfg.thresholds.weekly_remaining_pct,
+            )
+            alert = classify_claude_error(
+                exc,
+                notice_prefix="cycle failed during prioritization",
+                reason_label="prioritization",
+            )
+            if alert.limit_reached:
+                _LOG.warning("claude limit reached during prioritization: %s", exc)
+            else:
+                _LOG.warning("claude error during prioritization: %s", exc)
+            notify(alert.notice)
+            return CycleResult(executed=False, reason=alert.reason, usage=usage)
 
     if isinstance(prioritized, NoActionableIssue):
         _LOG.info("no actionable issue: %s", prioritized.reason)
@@ -178,27 +199,30 @@ def run_cycle(
             usage=usage,
         )
     decision, picked = prioritized
-    label_kind = task_kind_from_labels(picked.labels)
-    if label_kind is not None and label_kind is not decision.kind:
-        _LOG.info(
-            "overriding kind from label: %s -> %s for %s#%d",
-            decision.kind.value,
-            label_kind.value,
-            decision.repo,
-            decision.number,
-        )
-        decision = decision.model_copy(update={"kind": label_kind})
-    elif (
-        label_kind is None
-        and IMPLEMENTATION_LABEL in picked.labels
-        and INVESTIGATION_LABEL in picked.labels
-    ):
-        _LOG.warning(
-            "conflicting kind labels on %s#%d, falling back to claude kind=%s",
-            decision.repo,
-            decision.number,
-            decision.kind.value,
-        )
+    # short-circuit 経路 (reviewed) では IMPLEMENTATION 固定 = マージ処理が不変条件。
+    # 他のラベル (implementation/investigation) が併存していても override しない。
+    if reviewed is None:
+        label_kind = task_kind_from_labels(picked.labels)
+        if label_kind is not None and label_kind is not decision.kind:
+            _LOG.info(
+                "overriding kind from label: %s -> %s for %s#%d",
+                decision.kind.value,
+                label_kind.value,
+                decision.repo,
+                decision.number,
+            )
+            decision = decision.model_copy(update={"kind": label_kind})
+        elif (
+            label_kind is None
+            and IMPLEMENTATION_LABEL in picked.labels
+            and INVESTIGATION_LABEL in picked.labels
+        ):
+            _LOG.warning(
+                "conflicting kind labels on %s#%d, falling back to claude kind=%s",
+                decision.repo,
+                decision.number,
+                decision.kind.value,
+            )
     _LOG.info(
         "prioritized %s#%d as %s",
         decision.repo,
