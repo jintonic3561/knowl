@@ -103,10 +103,128 @@ def test_run_cycle_no_op_when_no_issues(tmp_path: Path) -> None:
         ensure_container=lambda _: None,
     )
     assert result.executed is False
+    assert result.idle is True
     assert "no open issues" in result.reason
     # 「進めるべき issue がない」旨を Slack に流す
     assert len(posted) == 1
     assert "issue" in posted[0].lower() or "進めるべき" in posted[0]
+
+
+def test_run_cycle_suppresses_idle_notice_when_requested(tmp_path: Path) -> None:
+    """前回 idle だった場合の連続通知抑止: idle ケースで notify を呼ばない."""
+    cfg = app_cfg(tmp_path)
+    posted: list[str] = []
+    result = run_cycle(
+        cfg,
+        fetch_usage=lambda: UsageSnapshot(
+            session_remaining_pct=80, weekly_remaining_pct=80
+        ),
+        list_issues=lambda repos: [],
+        prioritize=lambda issues, **_: pytest.fail(  # pragma: no cover
+            "prioritize must not be invoked when no issues"
+        ),
+        run_task=lambda *a, **kw: pytest.fail(  # pragma: no cover
+            "run_task must not be invoked"
+        ),
+        notify=posted.append,
+        ensure_container=lambda _: None,
+        suppress_idle_notice=True,
+    )
+    assert result.executed is False
+    assert result.idle is True
+    assert "no open issues" in result.reason
+    assert posted == []
+
+
+def test_run_cycle_idle_when_all_blocked(tmp_path: Path) -> None:
+    from knowl.filters import INVESTIGATED_LABEL
+
+    cfg = app_cfg(tmp_path)
+    posted: list[str] = []
+    result = run_cycle(
+        cfg,
+        fetch_usage=lambda: UsageSnapshot(
+            session_remaining_pct=80, weekly_remaining_pct=80
+        ),
+        list_issues=lambda repos: [make_issue(labels=(INVESTIGATED_LABEL,))],
+        prioritize=lambda issues, **_: pytest.fail(  # pragma: no cover
+            "prioritize must not be invoked"
+        ),
+        run_task=lambda *a, **kw: pytest.fail(  # pragma: no cover
+            "run_task must not be invoked"
+        ),
+        notify=posted.append,
+        ensure_container=lambda _: None,
+        suppress_idle_notice=True,
+    )
+    assert result.executed is False
+    assert result.idle is True
+    assert posted == []
+
+
+def test_run_cycle_idle_when_no_actionable_issue_suppressed(tmp_path: Path) -> None:
+    from knowl.prioritize import NoActionableIssue
+
+    cfg = app_cfg(tmp_path)
+    posted: list[str] = []
+
+    def prioritize(
+        issues: list[IssueRef], *, model: str
+    ) -> tuple[PriorityDecision, IssueRef] | NoActionableIssue:
+        return NoActionableIssue(reason="all waiting for human review")
+
+    result = run_cycle(
+        cfg,
+        fetch_usage=lambda: UsageSnapshot(
+            session_remaining_pct=80, weekly_remaining_pct=80
+        ),
+        list_issues=lambda repos: [make_issue()],
+        prioritize=prioritize,
+        run_task=lambda *a, **kw: pytest.fail(  # pragma: no cover
+            "run_task must not be invoked"
+        ),
+        notify=posted.append,
+        ensure_container=lambda _: pytest.fail(  # pragma: no cover
+            "container must not be ensured"
+        ),
+        suppress_idle_notice=True,
+    )
+    assert result.executed is False
+    assert result.idle is True
+    assert posted == []
+
+
+def test_run_cycle_does_not_suppress_error_notice(tmp_path: Path) -> None:
+    """エラー通知は suppress_idle_notice=True でも常に飛ぶ."""
+    cfg = app_cfg(tmp_path)
+    posted: list[str] = []
+
+    def list_issues(_repos: object) -> list[IssueRef]:
+        from knowl.github_client import GitHubError
+
+        raise GitHubError("gh auth required")
+
+    result = run_cycle(
+        cfg,
+        fetch_usage=lambda: UsageSnapshot(
+            session_remaining_pct=80, weekly_remaining_pct=80
+        ),
+        list_issues=list_issues,
+        prioritize=lambda issues, **_: pytest.fail(  # pragma: no cover
+            "prioritize must not be invoked"
+        ),
+        run_task=lambda *a, **kw: pytest.fail(  # pragma: no cover
+            "run_task must not be invoked"
+        ),
+        notify=posted.append,
+        ensure_container=lambda _: None,
+        suppress_idle_notice=True,
+    )
+    assert result.executed is False
+    assert result.idle is False
+    # idle ではないのでエラー通知は飛ぶ
+    assert len(posted) == 1
+    assert "issue collection" in posted[0]
 
 
 def test_run_cycle_no_op_when_all_issues_blocked(tmp_path: Path) -> None:

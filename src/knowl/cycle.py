@@ -64,6 +64,7 @@ class RunTask(Protocol):
 class CycleResult:
     executed: bool
     reason: str
+    idle: bool = False
     usage: UsageSnapshot | None = None
     outcome: TaskOutcome | None = None
     issue: IssueRef | None = None
@@ -84,8 +85,19 @@ def run_cycle(
     run_task: RunTask,
     notify: Notify,
     ensure_container: EnsureContainer,
+    suppress_idle_notice: bool = False,
 ) -> CycleResult:
-    """1 サイクル分の処理を行い結果を返す."""
+    """1 サイクル分の処理を行い結果を返す.
+
+    ``suppress_idle_notice=True`` のとき、 idle (進めるべき issue 無し) 時の
+    Slack 通知を省略する。 cron で 1 時間毎に走るので、連続して idle が続くと
+    同じ文面が延々と流れる。 CLI 側で前回 ``CycleResult.idle`` を覚えておき、
+    次サイクルで True を渡すことで連続通知を抑える。
+    """
+    def notify_idle(reason: str) -> None:
+        if not suppress_idle_notice:
+            notify(build_idle_notice(reason))
+
     try:
         usage = fetch_usage()
     except TokenExpiredError as exc:
@@ -116,16 +128,21 @@ def run_cycle(
         )
     if not issues:
         _LOG.info("no open issues across registered repositories")
-        notify(build_idle_notice("open issue が見つからない"))
-        return CycleResult(executed=False, reason="no open issues", usage=usage)
+        notify_idle("open issue が見つからない")
+        return CycleResult(
+            executed=False, reason="no open issues", idle=True, usage=usage
+        )
 
     candidates = exclude_blocked_issues(issues)
     if not candidates:
         reason = "open issue は全て PR レビュー中 / 調査完了済み"
         _LOG.info("all open issues blocked: %s", reason)
-        notify(build_idle_notice(reason))
+        notify_idle(reason)
         return CycleResult(
-            executed=False, reason=f"no actionable issue: {reason}", usage=usage
+            executed=False,
+            reason=f"no actionable issue: {reason}",
+            idle=True,
+            usage=usage,
         )
 
     try:
@@ -153,10 +170,11 @@ def run_cycle(
 
     if isinstance(prioritized, NoActionableIssue):
         _LOG.info("no actionable issue: %s", prioritized.reason)
-        notify(build_idle_notice(prioritized.reason))
+        notify_idle(prioritized.reason)
         return CycleResult(
             executed=False,
             reason=f"no actionable issue: {prioritized.reason}",
+            idle=True,
             usage=usage,
         )
     decision, picked = prioritized
